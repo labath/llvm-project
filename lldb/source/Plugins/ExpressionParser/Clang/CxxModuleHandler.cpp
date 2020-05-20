@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "Plugins/ExpressionParser/Clang/CxxModuleHandler.h"
+#include "Plugins/ExpressionParser/Clang/ClangASTImporter.h"
+#include "Plugins/ExpressionParser/Clang/ClangASTMetadata.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
 #include "lldb/Utility/Log.h"

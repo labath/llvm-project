@@ -876,6 +876,19 @@ ClangASTImporter::ASTImporterDelegate::ImportImpl(Decl *From) {
     }
   }
 
+  const ClangASTMetadata *md = m_master.GetDeclMetadata(From);
+  auto *rd = dyn_cast<CXXRecordDecl>(From);
+  if (rd && md && md->IsForcefullyCompleted()) {
+    Expected<Decl *> expected_rd = ASTImporter::ImportImpl(From);
+    assert(expected_rd);
+    RegisterImportedDecl(From, *expected_rd);
+
+    getToContext().getExternalSource()->CompleteType(
+        cast<CXXRecordDecl>(*expected_rd));
+    m_decls_to_ignore.insert(*expected_rd);
+    return *expected_rd;
+  }
+
   return ASTImporter::ImportImpl(From);
 }
 

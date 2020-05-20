@@ -2885,7 +2885,7 @@ ExpectedDecl ASTNodeImporter::VisitRecordDecl(RecordDecl *D) {
   if (D->isAnonymousStructOrUnion())
     D2->setAnonymousStructOrUnion(true);
 
-  if (D->isCompleteDefinition())
+  if (D->isCompleteDefinition() && !Importer.isMinimalImport())
     if (Error Err = ImportDefinition(D, D2, IDK_Default))
       return std::move(Err);
 

@@ -2081,6 +2081,11 @@ bool DWARFASTParserClang::CompleteRecordType(const DWARFDIE &die,
                     base_class_type)) {
               TypeSystemClang::CompleteTagDeclarationDefinition(
                   base_class_type);
+              const auto *td = TypeSystemClang::GetQualType(
+                                   base_class_type.GetOpaqueQualType())
+                                   .getTypePtr()
+                                   ->getAsTagDecl();
+              m_ast.GetMetadata(td)->SetIsForcefullyCompleted();
             }
           }
         }
