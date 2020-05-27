@@ -15683,6 +15683,8 @@ Decl *Sema::ActOnTag(Scope *S, unsigned TagSpec, TagUseKind TUK,
 
           // Diagnose attempts to redefine a tag.
           if (TUK == TUK_Definition) {
+            if (PrevTagDecl->hasExternalLexicalStorage())
+              Context.getExternalSource()->CompleteType(PrevTagDecl);
             if (NamedDecl *Def = PrevTagDecl->getDefinition()) {
               // If we're defining a specialization and the previous definition
               // is from an implicit instantiation, don't emit an error

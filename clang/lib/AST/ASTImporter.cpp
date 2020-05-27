@@ -1732,35 +1732,32 @@ ASTNodeImporter::ImportDeclContext(DeclContext *FromDC, bool ForceImport) {
 
   Error ChildErrors = Error::success();
   for (auto *From : FromDC->decls()) {
-    ExpectedDecl ImportedOrErr = import(From);
-
     // If we are in the process of ImportDefinition(...) for a RecordDecl we
     // want to make sure that we are also completing each FieldDecl. There
     // are currently cases where this does not happen and this is correctness
     // fix since operations such as code generation will expect this to be so.
-    if (ImportedOrErr) {
-      FieldDecl *FieldFrom = dyn_cast_or_null<FieldDecl>(From);
-      Decl *ImportedDecl = *ImportedOrErr;
-      FieldDecl *FieldTo = dyn_cast_or_null<FieldDecl>(ImportedDecl);
-      if (FieldFrom && FieldTo) {
-        const RecordType *RecordFrom = FieldFrom->getType()->getAs<RecordType>();
-        const RecordType *RecordTo = FieldTo->getType()->getAs<RecordType>();
-        if (RecordFrom && RecordTo) {
-          RecordDecl *FromRecordDecl = RecordFrom->getDecl();
-          RecordDecl *ToRecordDecl = RecordTo->getDecl();
+    if (auto *FieldFrom = dyn_cast_or_null<FieldDecl>(From)) {
+      if (const auto *RecordFrom = FieldFrom->getType()->getAs<RecordType>()) {
+        RecordDecl *FromRecordDecl = RecordFrom->getDecl();
 
-          if (FromRecordDecl->isCompleteDefinition() &&
-              !ToRecordDecl->isCompleteDefinition()) {
-            Error Err = ImportDefinition(FromRecordDecl, ToRecordDecl);
+        if (FromRecordDecl->isCompleteDefinition()) {
+          ExpectedDecl ImportedOrErr = import(RecordFrom->getDecl());
+          Error Err = ImportedOrErr
+                          ? ImportDefinition(FromRecordDecl,
+                                             cast<RecordDecl>(*ImportedOrErr))
+                          : ImportedOrErr.takeError();
 
-            if (Err && AccumulateChildErrors)
-              ChildErrors =  joinErrors(std::move(ChildErrors), std::move(Err));
-            else
-              consumeError(std::move(Err));
-          }
+          if (Err && AccumulateChildErrors)
+            ChildErrors = joinErrors(std::move(ChildErrors), std::move(Err));
+          else
+            consumeError(std::move(Err));
         }
       }
-    } else {
+    }
+  }
+  for (auto *From : FromDC->decls()) {
+    ExpectedDecl ImportedOrErr = import(From);
+    if (!ImportedOrErr) {
       if (AccumulateChildErrors)
         ChildErrors =
             joinErrors(std::move(ChildErrors), ImportedOrErr.takeError());
@@ -2885,7 +2882,8 @@ ExpectedDecl ASTNodeImporter::VisitRecordDecl(RecordDecl *D) {
   if (D->isAnonymousStructOrUnion())
     D2->setAnonymousStructOrUnion(true);
 
-  if (D->isCompleteDefinition() && !Importer.isMinimalImport())
+  if (D->isCompleteDefinition() &&
+      (!Importer.isMinimalImport() || D->getTypedefNameForAnonDecl()))
     if (Error Err = ImportDefinition(D, D2, IDK_Default))
       return std::move(Err);
 
@@ -3858,6 +3856,14 @@ ExpectedDecl ASTNodeImporter::VisitVarDecl(VarDecl *D) {
 
   Error Err = Error::success();
   auto ToType = importChecked(Err, D->getType());
+  if (!Err) {
+    RecordDecl *Tag = D->getType()->getAsRecordDecl();
+    RecordDecl *ToTag = ToType->getAsRecordDecl();
+    if (Tag && ToTag && Tag->isCompleteDefinition() &&
+        !ToTag->isCompleteDefinition()) {
+      Err = ImportDefinition(Tag, ToTag);
+    }
+  }
   auto ToTypeSourceInfo = importChecked(Err, D->getTypeSourceInfo());
   auto ToInnerLocStart = importChecked(Err, D->getInnerLocStart());
   auto ToQualifierLoc = importChecked(Err, D->getQualifierLoc());

@@ -901,6 +901,7 @@ void ClangASTImporter::ASTImporterDelegate::ImportDefinitionTo(
   // target but would create a second declaration that would then be defined.
   // We want that 'to' is actually complete after this function so let's
   // tell the ASTImporter that 'to' was imported from 'from'.
+  to = to->getMostRecentDecl();
   MapImported(from, to);
   ASTImporter::Imported(from, to);
 

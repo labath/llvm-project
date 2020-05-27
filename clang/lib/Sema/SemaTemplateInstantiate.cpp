@@ -2589,6 +2589,10 @@ Sema::InstantiateClass(SourceLocation PointOfInstantiation,
                        const MultiLevelTemplateArgumentList &TemplateArgs,
                        TemplateSpecializationKind TSK,
                        bool Complain) {
+  if (auto *Source = Context.getExternalSource()) {
+    if (!Pattern->hasDefinition() && Pattern->hasExternalLexicalStorage())
+      Source->CompleteType(Pattern);
+  }
   CXXRecordDecl *PatternDef
     = cast_or_null<CXXRecordDecl>(Pattern->getDefinition());
   if (DiagnoseUninstantiableTemplate(PointOfInstantiation, Instantiation,

@@ -484,16 +484,17 @@ void ClangASTSource::FindExternalLexicalDecls(
                    decl->getDeclKindName(), ast_dump);
       }
 
-      Decl *copied_decl = CopyDecl(decl);
-
-      if (!copied_decl)
-        continue;
-
-      if (FieldDecl *copied_field = dyn_cast<FieldDecl>(copied_decl)) {
-        QualType copied_field_type = copied_field->getType();
-
-        m_ast_importer_sp->RequireCompleteType(copied_field_type);
+      if (auto *field = dyn_cast<FieldDecl>(decl)) {
+        if (auto *record = field->getType()->getAsRecordDecl()) {
+          Decl *copied_record = CopyDecl(record);
+          if (!copied_record)
+            continue;
+          m_ast_importer_sp->RequireCompleteType(
+              QualType(cast<TagDecl>(copied_record)->getTypeForDecl(), 0));
+        }
       }
+
+      CopyDecl(decl);
     } else {
       SkippedDecls = true;
     }
