@@ -116,9 +116,8 @@ Status PipePosix::CreateNew(llvm::StringRef name, bool child_process_inherit) {
   return error;
 }
 
-Status PipePosix::CreateWithUniqueName(llvm::StringRef prefix,
-                                       bool child_process_inherit,
-                                       llvm::SmallVectorImpl<char> &name) {
+llvm::Expected<PipePosix::UnconnectedReadPipe>
+PipePosix::CreateForReadingWithUniqueName(llvm::StringRef prefix) {
   llvm::SmallString<128> named_pipe_path;
   llvm::SmallString<128> pipe_spec((prefix + ".%%%%%%").str());
   FileSpec tmpdir_file_spec = HostInfo::GetProcessTempDir();
@@ -129,35 +128,27 @@ Status PipePosix::CreateWithUniqueName(llvm::StringRef prefix,
   // It's possible that another process creates the target path after we've
   // verified it's available but before we create it, in which case we should
   // try again.
-  Status error;
+  int error;
   do {
     llvm::sys::fs::createUniquePath(tmpdir_file_spec.GetPath(), named_pipe_path,
                                     /*MakeAbsolute=*/false);
-    error = CreateNew(named_pipe_path, child_process_inherit);
-  } while (error.GetError() == EEXIST);
+    error = 0;
+    if (::mkfifo(named_pipe_path.c_str(), 0660) != 0)
+      error = errno;
+  } while (error == EEXIST);
 
-  if (error.Success())
-    name = named_pipe_path;
-  return error;
-}
+  if (error != 0)
+    return llvm::errorCodeToError({errno, std::generic_category()});
 
-Status PipePosix::OpenAsReader(llvm::StringRef name,
-                               bool child_process_inherit) {
-  if (CanRead() || CanWrite())
-    return Status("Pipe is already opened");
+  int flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
 
-  int flags = O_RDONLY | O_NONBLOCK;
-  if (!child_process_inherit)
-    flags |= O_CLOEXEC;
-
-  Status error;
-  int fd = llvm::sys::RetryAfterSignal(-1, ::open, name.str().c_str(), flags);
-  if (fd != -1)
-    m_fds[READ] = fd;
-  else
-    error.SetErrorToErrno();
-
-  return error;
+  int fd = llvm::sys::RetryAfterSignal(-1, ::open, named_pipe_path.c_str(), flags);
+  if (fd == -1) {
+    error = errno;
+    llvm::sys::fs::remove(named_pipe_path);
+    return llvm::errorCodeToError({errno, std::generic_category()});
+  }
+  return UnconnectedReadPipe(named_pipe_path, fd);
 }
 
 Status

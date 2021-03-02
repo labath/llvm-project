@@ -10,7 +10,9 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Errc.h"
 
 #include <fcntl.h>
 #include <io.h>
@@ -41,6 +43,9 @@ PipeWindows::PipeWindows(pipe_t read, pipe_t write)
       m_write_fd(PipeWindows::kInvalidDescriptor) {
   assert(read != LLDB_INVALID_PIPE || write != LLDB_INVALID_PIPE);
 
+  ZeroMemory(&m_read_overlapped, sizeof(m_read_overlapped));
+  ZeroMemory(&m_write_overlapped, sizeof(m_write_overlapped));
+
   // Don't risk in passing file descriptors and getting handles from them by
   // _get_osfhandle since the retrieved handles are highly likely unrecognized
   // in the current process and usually crashes the program.  Pass handles
@@ -51,6 +56,8 @@ PipeWindows::PipeWindows(pipe_t read, pipe_t write)
     // Make sure the fd and native handle are consistent.
     if (m_read_fd < 0)
       m_read = INVALID_HANDLE_VALUE;
+    else
+      m_read_overlapped.hEvent = ::CreateEvent(nullptr, TRUE, FALSE, nullptr);
   }
 
   if (write != LLDB_INVALID_PIPE) {
@@ -58,9 +65,11 @@ PipeWindows::PipeWindows(pipe_t read, pipe_t write)
     if (m_write_fd < 0)
       m_write = INVALID_HANDLE_VALUE;
   }
+}
 
-  ZeroMemory(&m_read_overlapped, sizeof(m_read_overlapped));
-  ZeroMemory(&m_write_overlapped, sizeof(m_write_overlapped));
+PipeWindows::PipeWindows(PipeWindows &&rhs) : m_read(rhs.m_read), m_write(rhs.m_write), m_read_fd(rhs.m_read_fd), m_write_fd(rhs.m_write_fd), m_read_overlapped(rhs.m_read_overlapped), m_write_overlapped(rhs.m_write_overlapped) {
+  rhs.m_read = rhs.m_write = INVALID_HANDLE_VALUE;
+  rhs.m_read_fd = rhs.m_write_fd = kInvalidDescriptor;
 }
 
 PipeWindows::~PipeWindows() { Close(); }
@@ -130,36 +139,48 @@ Status PipeWindows::CreateNew(llvm::StringRef name,
   return result;
 }
 
-Status PipeWindows::CreateWithUniqueName(llvm::StringRef prefix,
-                                         bool child_process_inherit,
-                                         llvm::SmallVectorImpl<char> &name) {
+llvm::Expected<PipeWindows::UnconnectedReadPipe> PipeWindows::CreateForReadingWithUniqueName(llvm::StringRef prefix) {
+  const bool child_process_inherit = false;
   llvm::SmallString<128> pipe_name;
-  Status error;
-  ::UUID unique_id;
-  RPC_CSTR unique_string;
-  RPC_STATUS status = ::UuidCreate(&unique_id);
-  if (status == RPC_S_OK || status == RPC_S_UUID_LOCAL_ONLY)
-    status = ::UuidToStringA(&unique_id, &unique_string);
-  if (status == RPC_S_OK) {
-    pipe_name = prefix;
-    pipe_name += "-";
-    pipe_name += reinterpret_cast<char *>(unique_string);
-    ::RpcStringFreeA(&unique_string);
-    error = CreateNew(pipe_name, child_process_inherit);
-  } else {
-    error.SetError(status, eErrorTypeWin32);
+  llvm::SmallString<128> pipe_spec={g_pipe_name_prefix, prefix, ".%%%%%%%%%%"};
+  DWORD error;
+  unsigned attempts = 10;
+  HANDLE handle;
+  do {
+    llvm::sys::fs::createUniquePath(pipe_spec, pipe_name, /*MakeAbsolute=*/false);
+    handle = ::CreateNamedPipeA(pipe_name.c_str(), PIPE_ACCESS_INBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED, PIPE_TYPE_BYTE | PIPE_WAIT, 1, 1024, 1024, 0, nullptr);
+    error = ::GetLastError();
+  } while (handle == INVALID_HANDLE_VALUE && error == ERROR_ACCESS_DENIED && attempts-- > 0);
+  if (handle == INVALID_HANDLE_VALUE)
+    return Status(error, eErrorTypeWin32).ToError();
+
+
+  std::unique_ptr<OVERLAPPED> overlapped_up(new OVERLAPPED{});
+  overlapped_up->hEvent = ::CreateEvent(nullptr, true, false, nullptr);
+
+  if (::ConnectNamedPipe(handle, overlapped_up.get()))
+    error = ERROR_PIPE_CONNECTED;
+  else
+    error = ::GetLastError();
+  if (error == ERROR_PIPE_CONNECTED) {
+    ::CloseHandle(overlapped_up->hEvent);
+    overlapped_up.reset();
   }
-  if (error.Success())
-    name = pipe_name;
-  return error;
+  if (error == ERROR_PIPE_CONNECTED || error == ERROR_IO_PENDING)
+    return UnconnectedReadPipe(llvm::StringRef(pipe_name).drop_front(g_pipe_name_prefix.size()), handle, std::move(overlapped_up));
+  return Status(error, eErrorTypeWin32).ToError();
 }
 
-Status PipeWindows::OpenAsReader(llvm::StringRef name,
-                                 bool child_process_inherit) {
-  if (CanRead())
-    return Status(ERROR_ALREADY_EXISTS, eErrorTypeWin32);
-
-  return OpenNamedPipe(name, child_process_inherit, true);
+llvm::Expected<PipeWindows> PipeWindows::UnconnectedReadPipe::Connect(Timeout<std::milli> timeout) {
+  if (m_overlapped_up) {
+    DWORD milliseconds = timeout ? timeout->count() : INFINITE;
+    DWORD unused;
+    if (! ::GetOverlappedResultEx(m_handle, m_overlapped_up.get(), &unused, milliseconds, true))
+      return Status(::GetLastError(), eErrorTypeWin32).ToError();
+    ::CloseHandle(m_overlapped_up->hEvent);
+    m_overlapped_up.reset();
+  }
+  return PipeWindows(m_handle, INVALID_HANDLE_VALUE);
 }
 
 Status

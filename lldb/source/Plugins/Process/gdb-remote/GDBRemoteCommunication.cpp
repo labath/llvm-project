@@ -1018,8 +1018,8 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
 #if defined(__APPLE__)
         // Binding to port zero, we need to figure out what port it ends up
         // using using a named pipe...
-        error = socket_pipe.CreateWithUniqueName("debugserver-named-pipe",
-                                                 false, named_pipe_path);
+        error = socket_pipe.CreateForReadingWithUniqueName(
+            "debugserver-named-pipe", named_pipe_path);
         if (error.Fail()) {
           LLDB_LOGF(log,
                     "GDBRemoteCommunication::%s() "
@@ -1153,15 +1153,6 @@ Status GDBRemoteCommunication::StartDebugserverProcess(
     if (error.Success() &&
         (launch_info.GetProcessID() != LLDB_INVALID_PROCESS_ID) &&
         pass_comm_fd == -1) {
-      if (named_pipe_path.size() > 0) {
-        error = socket_pipe.OpenAsReader(named_pipe_path, false);
-        if (error.Fail())
-          LLDB_LOGF(log,
-                    "GDBRemoteCommunication::%s() "
-                    "failed to open named pipe %s for reading: %s",
-                    __FUNCTION__, named_pipe_path.c_str(), error.AsCString());
-      }
-
       if (socket_pipe.CanWrite())
         socket_pipe.CloseWriteFileDescriptor();
       if (socket_pipe.CanRead()) {

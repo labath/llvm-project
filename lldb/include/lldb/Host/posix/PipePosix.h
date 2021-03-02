@@ -11,6 +11,8 @@
 #if defined(__cplusplus)
 
 #include "lldb/Host/PipeBase.h"
+#include "lldb/Utility/Timeout.h"
+#include "llvm/Support/Process.h"
 
 namespace lldb_private {
 
@@ -34,11 +36,36 @@ public:
 
   Status CreateNew(bool child_process_inherit) override;
   Status CreateNew(llvm::StringRef name, bool child_process_inherit) override;
-  Status CreateWithUniqueName(llvm::StringRef prefix,
-                              bool child_process_inherit,
-                              llvm::SmallVectorImpl<char> &name) override;
-  Status OpenAsReader(llvm::StringRef name,
-                      bool child_process_inherit) override;
+
+  class UnconnectedReadPipe {
+  public:
+    UnconnectedReadPipe(llvm::StringRef name, lldb::pipe_t fd)
+      : m_name(name), m_fd(fd) {}
+
+    llvm::StringRef GetName() { return m_name; }
+
+    UnconnectedReadPipe(UnconnectedReadPipe &&rhs)
+        : m_name(std::move(rhs.m_name)),
+          m_fd(std::exchange(rhs.m_fd, kInvalidDescriptor)) {}
+    void operator=(UnconnectedReadPipe &&) = delete;
+
+    ~UnconnectedReadPipe() {
+      if (m_fd != kInvalidDescriptor)
+        llvm::sys::Process::SafelyCloseFileDescriptor(m_fd);
+    }
+
+    llvm::Expected<PipePosix> Connect(Timeout<std::milli> timeout) {
+      return PipePosix(std::exchange(m_fd, kInvalidDescriptor),
+                       kInvalidDescriptor);
+    }
+
+  private:
+    llvm::SmallString<0> m_name;
+    lldb::pipe_t m_fd;
+  };
+  static llvm::Expected<UnconnectedReadPipe>
+  CreateForReadingWithUniqueName(llvm::StringRef prefix);
+
   Status
   OpenAsWriterWithTimeout(llvm::StringRef name, bool child_process_inherit,
                           const std::chrono::microseconds &timeout) override;

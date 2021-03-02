@@ -19,33 +19,26 @@ public:
   SubsystemRAII<FileSystem, HostInfo> subsystems;
 };
 
-TEST_F(PipeTest, CreateWithUniqueName) {
-  Pipe pipe;
-  llvm::SmallString<0> name;
-  ASSERT_THAT_ERROR(pipe.CreateWithUniqueName("PipeTest-CreateWithUniqueName",
-                                              /*child_process_inherit=*/false,
-                                              name)
-                        .ToError(),
-                    llvm::Succeeded());
-}
+TEST_F(PipeTest, CreateForReadingWithUniqueName) {
+  llvm::Expected<Pipe::UnconnectedReadPipe> unconnected_pipe = Pipe::CreateForReadingWithUniqueName("PipeTest-CreateForReadingWithUniqueName");
+  ASSERT_THAT_EXPECTED(unconnected_pipe, llvm::Succeeded());
 
-// Test broken
-#ifndef _WIN32
-TEST_F(PipeTest, OpenAsReader) {
-  Pipe pipe;
-  llvm::SmallString<0> name;
-  ASSERT_THAT_ERROR(pipe.CreateWithUniqueName("PipeTest-OpenAsReader",
-                                              /*child_process_inherit=*/false,
-                                              name)
-                        .ToError(),
-                    llvm::Succeeded());
-
-  // Ensure name is not null-terminated
-  size_t name_len = name.size();
-  name += "foobar";
-  llvm::StringRef name_ref(name.data(), name_len);
+  Pipe pipe2;
   ASSERT_THAT_ERROR(
-      pipe.OpenAsReader(name_ref, /*child_process_inherit=*/false).ToError(),
+      pipe2.OpenAsWriter(unconnected_pipe->GetName(), /*child_process_inherit=*/false).ToError(),
       llvm::Succeeded());
+
+  llvm::Expected<Pipe> pipe = unconnected_pipe->Connect(std::chrono::milliseconds(0));
+  ASSERT_THAT_EXPECTED(pipe, llvm::Succeeded());
+
+  size_t bytes_written;
+  ASSERT_THAT_ERROR(pipe2.Write("foo", 3, bytes_written).ToError(),
+                    llvm::Succeeded());
+
+  size_t bytes_read;
+  char buf[3];
+  ASSERT_THAT_ERROR(pipe->Read(buf, sizeof(buf), bytes_read).ToError(),
+      llvm::Succeeded());
+  EXPECT_EQ(bytes_read, 3u);
+  EXPECT_EQ(llvm::StringRef(buf, 3), "foo");
 }
-#endif

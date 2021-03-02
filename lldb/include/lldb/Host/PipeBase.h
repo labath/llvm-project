@@ -25,12 +25,14 @@ public:
   virtual Status CreateNew(bool child_process_inherit) = 0;
   virtual Status CreateNew(llvm::StringRef name,
                            bool child_process_inherit) = 0;
-  virtual Status CreateWithUniqueName(llvm::StringRef prefix,
-                                      bool child_process_inherit,
-                                      llvm::SmallVectorImpl<char> &name) = 0;
 
-  virtual Status OpenAsReader(llvm::StringRef name,
-                              bool child_process_inherit) = 0;
+  /// An object representing a (named) pipe open for reading, but which does not
+  /// yet have a writer connected. 
+  class UnconnectedReadPipe;
+  
+  /// Create a named pipe and open 
+  static llvm::Expected<UnconnectedReadPipe>
+  CreateForReadingWithUniqueName(llvm::StringRef prefix) = delete;
 
   Status OpenAsWriter(llvm::StringRef name, bool child_process_inherit);
   virtual Status

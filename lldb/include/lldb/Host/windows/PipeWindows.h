@@ -11,6 +11,7 @@
 
 #include "lldb/Host/PipeBase.h"
 #include "lldb/Host/windows/windows.h"
+#include "lldb/Utility/Timeout.h"
 
 namespace lldb_private {
 
@@ -26,6 +27,7 @@ public:
 public:
   PipeWindows();
   PipeWindows(lldb::pipe_t read, lldb::pipe_t write);
+  PipeWindows(PipeWindows &&rhs);
   ~PipeWindows() override;
 
   // Create an unnamed pipe.
@@ -34,11 +36,28 @@ public:
   // Create a named pipe.
   Status CreateNewNamed(bool child_process_inherit);
   Status CreateNew(llvm::StringRef name, bool child_process_inherit) override;
-  Status CreateWithUniqueName(llvm::StringRef prefix,
-                              bool child_process_inherit,
-                              llvm::SmallVectorImpl<char> &name) override;
-  Status OpenAsReader(llvm::StringRef name,
-                      bool child_process_inherit) override;
+
+  class UnconnectedReadPipe {
+  public:
+    UnconnectedReadPipe(llvm::StringRef name, HANDLE handle,
+                        std::unique_ptr<OVERLAPPED> overlapped_up)
+        : m_name(name), m_handle(handle),
+          m_overlapped_up(std::move(overlapped_up)) {}
+    llvm::StringRef GetName() { return m_name; }
+
+    UnconnectedReadPipe(UnconnectedReadPipe &&rhs) = default;
+    void operator=(UnconnectedReadPipe &&) = delete;
+
+    llvm::Expected<PipeWindows> Connect(Timeout<std::milli> timeout);
+
+  private:
+    llvm::SmallString<0> m_name;
+    HANDLE m_handle;
+    std::unique_ptr<OVERLAPPED> m_overlapped_up;
+  };
+  static llvm::Expected<UnconnectedReadPipe>
+  CreateForReadingWithUniqueName(llvm::StringRef prefix);
+
   Status
   OpenAsWriterWithTimeout(llvm::StringRef name, bool child_process_inherit,
                           const std::chrono::microseconds &timeout) override;
