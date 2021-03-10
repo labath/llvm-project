@@ -43,10 +43,21 @@ public:
                         std::unique_ptr<OVERLAPPED> overlapped_up)
         : m_name(name), m_handle(handle),
           m_overlapped_up(std::move(overlapped_up)) {}
-    llvm::StringRef GetName() { return m_name; }
 
-    UnconnectedReadPipe(UnconnectedReadPipe &&rhs) = default;
-    void operator=(UnconnectedReadPipe &&) = delete;
+    UnconnectedReadPipe(UnconnectedReadPipe &&rhs)
+        : m_handle(INVALID_HANDLE_VALUE) {
+      *this = std::move(rhs);
+    }
+    void operator=(UnconnectedReadPipe &&rhs) {
+      Free(); 
+      m_name = std::move(rhs.m_name);
+      m_handle = std::exchange(rhs.m_handle, INVALID_HANDLE_VALUE);
+      m_overlapped_up = std::move(m_overlapped_up);
+    }
+
+    ~UnconnectedReadPipe() { Free(); }
+
+    llvm::StringRef GetName() { return m_name; }
 
     llvm::Expected<PipeWindows> Connect(Timeout<std::milli> timeout);
 
@@ -54,6 +65,13 @@ public:
     llvm::SmallString<0> m_name;
     HANDLE m_handle;
     std::unique_ptr<OVERLAPPED> m_overlapped_up;
+
+    void Free() {
+      if (m_overlapped_up)
+        ::CloseHandle(m_overlapped_up->hEvent);
+      if (m_handle != INVALID_HANDLE_VALUE)
+        ::CloseHandle(m_handle);
+    }
   };
   static llvm::Expected<UnconnectedReadPipe>
   CreateForReadingWithUniqueName(llvm::StringRef prefix);

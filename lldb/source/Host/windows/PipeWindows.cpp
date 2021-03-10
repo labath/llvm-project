@@ -168,6 +168,8 @@ llvm::Expected<PipeWindows::UnconnectedReadPipe> PipeWindows::CreateForReadingWi
   }
   if (error == ERROR_PIPE_CONNECTED || error == ERROR_IO_PENDING)
     return UnconnectedReadPipe(llvm::StringRef(pipe_name).drop_front(g_pipe_name_prefix.size()), handle, std::move(overlapped_up));
+  ::CloseHandle(overlapped_up->hEvent);
+  ::CloseHandle(handle);
   return Status(error, eErrorTypeWin32).ToError();
 }
 

@@ -42,8 +42,6 @@ public:
     UnconnectedReadPipe(llvm::StringRef name, lldb::pipe_t fd)
       : m_name(name), m_fd(fd) {}
 
-    llvm::StringRef GetName() { return m_name; }
-
     UnconnectedReadPipe(UnconnectedReadPipe &&rhs)
         : m_name(std::move(rhs.m_name)),
           m_fd(std::exchange(rhs.m_fd, kInvalidDescriptor)) {}
@@ -53,6 +51,8 @@ public:
       if (m_fd != kInvalidDescriptor)
         llvm::sys::Process::SafelyCloseFileDescriptor(m_fd);
     }
+
+    llvm::StringRef GetName() { return m_name; }
 
     llvm::Expected<PipePosix> Connect(Timeout<std::milli> timeout) {
       return PipePosix(std::exchange(m_fd, kInvalidDescriptor),
