@@ -18,6 +18,8 @@ namespace dwarf {
 class DWARFDIE : public DWARFBaseDIE {
 public:
   class child_iterator;
+  class context_iterator;
+
   using DWARFBaseDIE::DWARFBaseDIE;
 
   // Tests
@@ -66,9 +68,6 @@ public:
   DWARFDIE
   LookupDeepestBlock(lldb::addr_t file_addr) const;
 
-  DWARFDIE
-  GetParentDeclContextDIE() const;
-
   /// Return this DIE's decl context as it is needed to look up types
   /// in Clang modules. This context will include any modules or functions that
   /// the type is declared in so an exact module match can be efficiently made.
@@ -105,6 +104,8 @@ public:
 
   /// The range of all the children of this DIE.
   llvm::iterator_range<child_iterator> children() const;
+
+  llvm::iterator_range<context_iterator> context() const;
 };
 
 class DWARFDIE::child_iterator
@@ -139,6 +140,38 @@ public:
     return *this;
   }
 };
+
+class DWARFDIE::context_iterator
+    : public llvm::iterator_facade_base<DWARFDIE::context_iterator,
+                                        std::forward_iterator_tag, DWARFDIE> {
+  /// The current context DWARFDIE. Can be invalid for the end() iterator.
+  DWARFDIE m_die;
+
+  /// DIEs we've already visited (to prevent loops). We assume the DIE tree is
+  /// valid, and only store DIEs visited through lateral jumps.
+  llvm::SmallSet<lldb::user_id_t, 2> m_seen;
+
+  void advance();
+
+public:
+  context_iterator() = default; // end()
+  context_iterator(const DWARFDIE &die) : m_die(die) { advance(); }
+  bool operator==(const context_iterator &it) const {
+    // DWARFDIE's operator== differentiates between an invalid DWARFDIE that
+    // has a CU but no DIE and one that has neither CU nor DIE. The 'end'
+    // iterator could be default constructed, so explicitly allow
+    // (CU, (DIE)nullptr) == (nullptr, nullptr) -> true
+    if (!m_die.IsValid() && !it.m_die.IsValid())
+      return true;
+    return m_die == it.m_die;
+  }
+  const DWARFDIE &operator*() const {
+    assert(m_die.IsValid() && "Derefencing invalid iterator?");
+    return m_die;
+  }
+  context_iterator &operator++();
+};
+
 } // namespace dwarf
 } // namespace lldb_private::plugin
 
