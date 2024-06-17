@@ -633,11 +633,6 @@ std::optional<uint64_t> DWARFDebugNames::Entry::getDIEUnitOffset() const {
 std::optional<uint64_t> DWARFDebugNames::Entry::getCUIndex() const {
   if (std::optional<DWARFFormValue> Off = lookup(dwarf::DW_IDX_compile_unit))
     return Off->getAsUnsignedConstant();
-  // In a per-CU index, the entries without a DW_IDX_compile_unit attribute
-  // implicitly refer to the single CU, but only if we don't have a
-  // DW_IDX_type_unit.
-  if (lookup(dwarf::DW_IDX_type_unit).has_value())
-    return std::nullopt;
   if (NameIdx->getCUCount() == 1)
     return 0;
   return std::nullopt;

@@ -53,7 +53,9 @@ public:
   public:
     /// Returns the Offset of the Compilation Unit associated with this
     /// Accelerator Entry or std::nullopt if the Compilation Unit offset is not
-    /// recorded in this Accelerator Entry.
+    /// recorded in this Accelerator Entry. Note that this does not necessarily
+    /// mean that this Accelerator Entry describes a Debug Info Entry in the
+    /// returned Compilation Unit.
     virtual std::optional<uint64_t> getCUOffset() const = 0;
 
     /// Returns the Offset of the Type Unit associated with this
@@ -209,6 +211,8 @@ public:
     void extract(uint64_t *Offset);
 
   public:
+    // For Apple tables, the Debug Info Entry described by this object is always
+    // in the Compilation Unit returned by this function.
     std::optional<uint64_t> getCUOffset() const override;
 
     /// Returns the Section Offset of the Debug Info Entry associated with this
@@ -433,7 +437,11 @@ public:
     Entry(const NameIndex &NameIdx, const Abbrev &Abbr);
 
   public:
+    // For debug_names, the Debug Info Entry described by this object is in the
+    // Compilation Unit returned by this function only if the entry does not
+    // contain a DW_IDX_type_unit value (getLocalTUOffset returns std::nullopt).
     std::optional<uint64_t> getCUOffset() const override;
+
     std::optional<uint64_t> getLocalTUOffset() const override;
     std::optional<dwarf::Tag> getTag() const override { return tag(); }
 
