@@ -43,7 +43,6 @@ static void SignalHandler(int signo, siginfo_t *info, void *) {
   g_signal_flags[signo] = 1;
 }
 
-
 class ToTimeSpec {
 public:
   explicit ToTimeSpec(std::optional<MainLoopPosix::TimePoint> point) {
@@ -259,16 +258,16 @@ MainLoopPosix::MainLoopPosix() {
   Status error = m_interrupt_pipe.CreateNew(/*child_process_inherit=*/false);
   assert(error.Success());
   const int interrupt_pipe_fd = m_interrupt_pipe.GetReadFileDescriptor();
-  m_read_fds.insert({interrupt_pipe_fd,
-                     [interrupt_pipe_fd](MainLoopBase &loop) {
-                       char c;
-                       ssize_t bytes_read = llvm::sys::RetryAfterSignal(
-                           -1, ::read, interrupt_pipe_fd, &c, 1);
-                       assert(bytes_read == 1);
-                       UNUSED_IF_ASSERT_DISABLED(bytes_read);
-                       // NB: This implicitly causes another loop iteration
-                       // and therefore the execution of pending callbacks.
-                     }});
+  m_read_fds.insert(
+      {interrupt_pipe_fd, [interrupt_pipe_fd](MainLoopBase &loop) {
+         char c;
+         ssize_t bytes_read =
+             llvm::sys::RetryAfterSignal(-1, ::read, interrupt_pipe_fd, &c, 1);
+         assert(bytes_read == 1);
+         UNUSED_IF_ASSERT_DISABLED(bytes_read);
+         // NB: This implicitly causes another loop iteration
+         // and therefore the execution of pending callbacks.
+       }});
 #if HAVE_SYS_EVENT_H
   m_kqueue = kqueue();
   assert(m_kqueue >= 0);

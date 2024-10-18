@@ -63,8 +63,7 @@ public:
 
   // Add a callback that will be executed after a certain amount of time has
   // passed.
-  void AddCallback(const Callback &callback,
-                   std::chrono::nanoseconds delay) {
+  void AddCallback(const Callback &callback, std::chrono::nanoseconds delay) {
     AddCallback(callback, std::chrono::steady_clock::now() + delay);
   }
 
