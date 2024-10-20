@@ -26,11 +26,6 @@
 #endif
 
 namespace lldb_private {
-template <typename SocketType>
-void CreateConnectedSockets(
-    llvm::StringRef listen_remote_address,
-    const std::function<std::string(const SocketType &)> &get_connect_addr,
-    std::unique_ptr<SocketType> *a_up, std::unique_ptr<SocketType> *b_up);
 bool CreateTCPConnectedSockets(std::string listen_remote_ip,
                                std::unique_ptr<TCPSocket> *a_up,
                                std::unique_ptr<TCPSocket> *b_up);

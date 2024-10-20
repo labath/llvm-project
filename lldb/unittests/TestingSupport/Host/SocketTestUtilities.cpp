@@ -20,38 +20,27 @@
 using namespace lldb_private;
 
 template <typename SocketType>
-void lldb_private::CreateConnectedSockets(
+static void CreateConnectedSockets(
     llvm::StringRef listen_remote_address,
-    const std::function<std::string(const SocketType &)> &get_connect_addr,
+    const std::function<std::string(const typename SocketType::listener_type &)> &get_connect_addr,
     std::unique_ptr<SocketType> *a_up, std::unique_ptr<SocketType> *b_up) {
-  Status error;
-  auto listen_socket_up = std::make_unique<SocketType>(true);
-  ASSERT_THAT_ERROR(error.ToError(), llvm::Succeeded());
-  error = listen_socket_up->Listen(listen_remote_address, 5);
-  ASSERT_THAT_ERROR(error.ToError(), llvm::Succeeded());
-  ASSERT_TRUE(listen_socket_up->IsValid());
 
-  std::string connect_remote_address = get_connect_addr(*listen_socket_up);
-  auto connect_socket_up = std::make_unique<SocketType>(true);
-  ASSERT_THAT_ERROR(error.ToError(), llvm::Succeeded());
-  error = connect_socket_up->Connect(connect_remote_address);
-  ASSERT_THAT_ERROR(error.ToError(), llvm::Succeeded());
-  ASSERT_TRUE(connect_socket_up->IsValid());
+  auto listening_socket_or_error = SocketType::listener_type::Create(listen_remote_address);
+  ASSERT_THAT_EXPECTED(listening_socket_or_error, llvm::Succeeded());
+  auto &listener = **listening_socket_or_error;
 
-  a_up->swap(connect_socket_up);
-  ASSERT_TRUE((*a_up)->IsValid());
+  std::string connect_remote_address = get_connect_addr(listener);
+  *a_up = std::make_unique<SocketType>(true);
+  Status error = a_up->get()->Connect(connect_remote_address);
+  ASSERT_THAT_ERROR(error.ToError(), llvm::Succeeded());
+  ASSERT_TRUE(a_up->get()->IsValid());
 
-  Socket *accept_socket;
-  ASSERT_THAT_ERROR(
-      listen_socket_up->Accept(std::chrono::seconds(1), accept_socket)
-          .takeError(),
-      llvm::Succeeded());
+  Socket *accept_socket = nullptr;
+  ASSERT_THAT_ERROR(listener.Accept(std::chrono::seconds(1), accept_socket).takeError(), llvm::Succeeded());
 
   b_up->reset(static_cast<SocketType *>(accept_socket));
   ASSERT_NE(nullptr, b_up->get());
   ASSERT_TRUE((*b_up)->IsValid());
-
-  listen_socket_up.reset();
 }
 
 bool lldb_private::CreateTCPConnectedSockets(
@@ -59,9 +48,9 @@ bool lldb_private::CreateTCPConnectedSockets(
     std::unique_ptr<TCPSocket> *socket_b_up) {
   StreamString strm;
   strm.Printf("[%s]:0", listen_remote_ip.c_str());
-  CreateConnectedSockets<TCPSocket>(
+  CreateConnectedSockets(
       strm.GetString(),
-      [=](const TCPSocket &s) {
+      [=](const ListeningTCPSocket &s) {
         char connect_remote_address[64];
         snprintf(connect_remote_address, sizeof(connect_remote_address),
                  "[%s]:%u", listen_remote_ip.c_str(), s.GetLocalPortNumber());
@@ -75,14 +64,14 @@ bool lldb_private::CreateTCPConnectedSockets(
 void lldb_private::CreateDomainConnectedSockets(
     llvm::StringRef path, std::unique_ptr<DomainSocket> *socket_a_up,
     std::unique_ptr<DomainSocket> *socket_b_up) {
-  return CreateConnectedSockets<DomainSocket>(
-      path, [=](const DomainSocket &) { return path.str(); }, socket_a_up,
+  return CreateConnectedSockets(
+      path, [=](const ListeningDomainSocket &) { return path.str(); }, socket_a_up,
       socket_b_up);
 }
 #endif
 
 static bool CheckIPSupport(llvm::StringRef Proto, llvm::StringRef Addr) {
-  llvm::Expected<std::unique_ptr<TCPSocket>> Sock = Socket::TcpListen(Addr);
+  llvm::Expected<std::unique_ptr<ListeningTCPSocket>> Sock = ListeningTCPSocket::Create(Addr);
   if (Sock)
     return true;
   llvm::Error Err = Sock.takeError();

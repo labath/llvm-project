@@ -95,13 +95,13 @@ void TestSocketConnect(const char *addr) {
       addresses.front().GetFamily() == AF_INET6 ? "[{0}]:0" : "{0}:0";
   std::string addr_wrap = llvm::formatv(fmt, addr).str();
 
-  Socket *server_socket;
-  llvm::Expected<std::unique_ptr<Socket>> socket_or_err =
-      Socket::TcpListen(addr_wrap, false);
+  ListeningTCPSocket *server_socket;
+  llvm::Expected<std::unique_ptr<ListeningTCPSocket>> socket_or_err =
+      ListeningTCPSocket::Create(addr_wrap);
   ASSERT_THAT_EXPECTED(socket_or_err, llvm::Succeeded());
   server_socket = socket_or_err->get();
 
-  auto port = ((TCPSocket *)server_socket)->GetLocalPortNumber();
+  auto port = server_socket->GetLocalPortNumber();
   auto child_pid = fork();
   if (child_pid != 0) {
     RNBSocket client_socket;

@@ -65,6 +65,27 @@ private:
   shared_fd_t m_fd;
 };
 
+namespace socket_detail {
+llvm::Expected<NativeSocket> CreateSocket(int domain, int type, int protocol);
+
+llvm::Error CloseSocket(NativeSocket sockfd);
+
+llvm::Error BindSocket(NativeSocket sockfd, const struct sockaddr *address, socklen_t address_len);
+inline llvm::Error BindSocket(NativeSocket sockfd, const SocketAddress &addr) {
+  return BindSocket(sockfd, &addr.sockaddr(), addr.GetLength());
+}
+
+llvm::Error ListenSocket(NativeSocket sockfd, int backlog);
+
+llvm::Error ConnectSocket(NativeSocket sockfd, const struct sockaddr *address, socklen_t address_len); 
+
+llvm::Expected<NativeSocket> AcceptSocket(NativeSocket sockfd, struct sockaddr *addr,
+                                   socklen_t *addrlen);
+
+llvm::Error SetSocketOption(NativeSocket sockfd, int level, int option_name,
+                       int option_value);
+} // namespace socket_detail
+
 class Socket : public IOObject {
 public:
   enum SocketProtocol {
@@ -111,24 +132,6 @@ public:
   CreatePair(std::optional<SocketProtocol> protocol = std::nullopt);
 
   virtual Status Connect(llvm::StringRef name) = 0;
-  virtual Status Listen(llvm::StringRef name, int backlog) = 0;
-
-  // Use the provided main loop instance to accept new connections. The callback
-  // will be called (from MainLoop::Run) for each new connection. This function
-  // does not block.
-  virtual llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
-  Accept(MainLoopBase &loop,
-         std::function<void(std::unique_ptr<Socket> socket)> sock_cb) = 0;
-
-  // Accept a single connection and "return" it in the pointer argument. This
-  // function blocks until the connection arrives.
-  virtual Status Accept(const Timeout<std::micro> &timeout, Socket *&socket);
-
-  // Initialize a Tcp Socket object in listening mode.  listen and accept are
-  // implemented separately because the caller may wish to manipulate or query
-  // the socket after it is initialized, but before entering a blocking accept.
-  static llvm::Expected<std::unique_ptr<TCPSocket>>
-  TcpListen(llvm::StringRef host_and_port, int backlog = 5);
 
   static llvm::Expected<std::unique_ptr<Socket>>
   TcpConnect(llvm::StringRef host_and_port);
@@ -142,11 +145,9 @@ public:
     return GetOption(m_socket, level, option_name, option_value);
   };
 
-  static int SetOption(NativeSocket sockfd, int level, int option_name,
-                       int option_value);
-  int SetOption(int level, int option_name, int option_value) {
-    return SetOption(m_socket, level, option_name, option_value);
-  };
+  llvm::Error SetOption(int level, int option_name, int option_value) {
+    return socket_detail::SetSocketOption(m_socket, level, option_name, option_value);
+  }
 
   NativeSocket GetNativeSocket() const { return m_socket; }
   SocketProtocol GetSocketProtocol() const { return m_protocol; }
@@ -165,27 +166,39 @@ public:
   // If this Socket is connected then return the URI used to connect.
   virtual std::string GetRemoteConnectionURI() const { return ""; };
 
-  // If the Socket is listening then return the URI for clients to connect.
-  virtual std::vector<std::string> GetListeningConnectionURI() const {
-    return {};
-  }
-
 protected:
   Socket(SocketProtocol protocol, bool should_close);
 
   virtual size_t Send(const void *buf, const size_t num_bytes);
 
-  static int CloseSocket(NativeSocket sockfd);
-  static Status GetLastError();
-  static void SetLastError(Status &error);
-  static NativeSocket CreateSocket(const int domain, const int type,
-                                   const int protocol, Status &error);
-  static NativeSocket AcceptSocket(NativeSocket sockfd, struct sockaddr *addr,
-                                   socklen_t *addrlen, Status &error);
-
   SocketProtocol m_protocol;
   NativeSocket m_socket;
   bool m_should_close_fd;
+};
+
+class ListeningSocket {
+public:
+  static constexpr int DefaultBacklog = 5;
+
+  static llvm::Expected<std::unique_ptr<ListeningSocket>> Create(Socket::SocketProtocol protocol, llvm::StringRef address, int backlog = DefaultBacklog);
+
+  virtual ~ListeningSocket() = default;
+
+  // Return the URIs clients can connect to.
+  virtual std::vector<std::string> GetConnectionURIs() const {
+    return {};
+  }
+
+  // Use the provided main loop instance to accept new connections. The callback
+  // will be called (from MainLoop::Run) for each new connection. This function
+  // does not block.
+  virtual llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
+  Accept(MainLoopBase &loop,
+         std::function<void(std::unique_ptr<Socket> socket)> sock_cb) = 0;
+
+  // Accept a single connection and "return" it in the pointer argument. This
+  // function blocks until the connection arrives (or the timeout expires).
+  virtual Status Accept(const Timeout<std::micro> &timeout, Socket *&socket);
 };
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,

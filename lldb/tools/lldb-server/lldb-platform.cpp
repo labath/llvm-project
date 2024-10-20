@@ -176,16 +176,15 @@ static Status save_socket_id_to_file(const std::string &socket_id,
 }
 
 static Status ListenGdbConnectionsIfNeeded(
-    const Socket::SocketProtocol protocol, std::unique_ptr<TCPSocket> &gdb_sock,
+    const Socket::SocketProtocol protocol, std::unique_ptr<ListeningTCPSocket> &gdb_sock,
     const std::string &gdb_address, uint16_t &gdbserver_port) {
   if (protocol != Socket::ProtocolTcp)
     return Status();
 
-  gdb_sock = std::make_unique<TCPSocket>(/*should_close=*/true);
-  Status error = gdb_sock->Listen(gdb_address, backlog);
-  if (error.Fail())
-    return error;
-
+  auto listening_socket_or_error = ListeningTCPSocket::Create("localhost:0", backlog);
+  if (!listening_socket_or_error)
+    return Status::FromError(listening_socket_or_error.takeError());
+  gdb_sock = std::move(*listening_socket_or_error);
   if (gdbserver_port == 0)
     gdbserver_port = gdb_sock->GetLocalPortNumber();
 
@@ -195,7 +194,7 @@ static Status ListenGdbConnectionsIfNeeded(
 static llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
 AcceptGdbConnectionsIfNeeded(const FileSpec &debugserver_path,
                              const Socket::SocketProtocol protocol,
-                             std::unique_ptr<TCPSocket> &gdb_sock,
+                             std::unique_ptr<ListeningTCPSocket> &gdb_sock,
                              MainLoop &main_loop, const uint16_t gdbserver_port,
                              const lldb_private::Args &args) {
   if (protocol != Socket::ProtocolTcp)
@@ -489,19 +488,13 @@ int main_platform(int argc, char *argv[]) {
       return socket_error;
     }
 
-    std::unique_ptr<Socket> socket;
-    if (gdbserver_port) {
-      socket = std::make_unique<TCPSocket>(sockfd, /*should_close=*/true);
-    } else {
+    GDBRemoteCommunicationServerPlatform platform(protocol, gdbserver_port);
+    Socket *socket;
+    if (protocol == Socket::ProtocolTcp)
+      socket = new TCPSocket(sockfd, /*should_close=*/true);
+    else {
 #if LLDB_ENABLE_POSIX
-      llvm::Expected<std::unique_ptr<DomainSocket>> domain_socket =
-          DomainSocket::FromBoundNativeSocket(sockfd, /*should_close=*/true);
-      if (!domain_socket) {
-        LLDB_LOG_ERROR(log, domain_socket.takeError(),
-                       "Failed to create socket: {0}");
-        return socket_error;
-      }
-      socket = std::move(domain_socket.get());
+      socket = new DomainSocket(sockfd, /*should_close=*/true);
 #else
       WithColor::error() << "lldb-platform child: Unix domain sockets are not "
                             "supported on this platform.";
@@ -536,19 +529,15 @@ int main_platform(int argc, char *argv[]) {
     return socket_error;
   }
 
-  std::unique_ptr<Socket> platform_sock = Socket::Create(protocol, error);
-  if (error.Fail()) {
-    printf("Failed to create platform socket: %s\n", error.AsCString());
+  auto platform_sock_or_error = ListeningSocket::Create(protocol, address, backlog);
+  if (!platform_sock_or_error) {
+    logAllUnhandledErrors(platform_sock_or_error.takeError(), WithColor::error(), "Failed to create platform socket: ");
     return socket_error;
   }
-  error = platform_sock->Listen(address, backlog);
-  if (error.Fail()) {
-    printf("Failed to listen platform: %s\n", error.AsCString());
-    return socket_error;
-  }
+  ListeningSocket &platform_sock = **platform_sock_or_error;
   if (protocol == Socket::ProtocolTcp && platform_port == 0)
     platform_port =
-        static_cast<TCPSocket *>(platform_sock.get())->GetLocalPortNumber();
+        static_cast<ListeningTCPSocket &>(platform_sock).GetLocalPortNumber();
 
   if (socket_file) {
     error = save_socket_id_to_file(
@@ -563,7 +552,7 @@ int main_platform(int argc, char *argv[]) {
     }
   }
 
-  std::unique_ptr<TCPSocket> gdb_sock;
+  std::unique_ptr<ListeningTCPSocket> gdb_sock;
   // Update gdbserver_port if it is still 0 and protocol is tcp.
   error = ListenGdbConnectionsIfNeeded(protocol, gdb_sock, gdb_address,
                                        gdbserver_port);
@@ -575,7 +564,7 @@ int main_platform(int argc, char *argv[]) {
   MainLoop main_loop;
   {
     llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>> platform_handles =
-        platform_sock->Accept(
+        platform_sock.Accept(
             main_loop, [progname, gdbserver_port, &inferior_arguments, log_file,
                         log_channels, &main_loop,
                         &platform_handles](std::unique_ptr<Socket> sock_up) {

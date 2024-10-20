@@ -19,8 +19,26 @@ public:
 
 protected:
   size_t GetNameOffset() const override;
-  void DeleteSocketFile(llvm::StringRef name) override;
 };
-}
+
+class ListeningAbstractSocket : public ListeningDomainSocket {
+public:
+  static llvm::Expected<std::unique_ptr<ListeningAbstractSocket>>
+  Create(llvm::StringRef name, int backlog = DefaultBacklog);
+
+  using socket_type = AbstractSocket;
+
+  std::vector<std::string> GetConnectionURIs() const override;
+
+  using ListeningSocket::Accept;
+  llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
+  Accept(MainLoopBase &loop,
+         std::function<void(std::unique_ptr<Socket> socket)> sock_cb) override;
+
+private:
+  using ListeningDomainSocket::ListeningDomainSocket;
+};
+
+} // namespace lldb_private
 
 #endif // ifndef liblldb_AbstractSocket_h_

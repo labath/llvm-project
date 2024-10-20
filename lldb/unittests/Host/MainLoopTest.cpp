@@ -27,20 +27,17 @@ public:
   SubsystemRAII<FileSystem, Socket> subsystems;
 
   void SetUp() override {
-    Status error;
-    auto listen_socket_up = std::make_unique<TCPSocket>(true);
-    ASSERT_TRUE(error.Success());
-    error = listen_socket_up->Listen("localhost:0", 5);
-    ASSERT_TRUE(error.Success());
+    auto listening_socket_or_error = ListeningTCPSocket::Create("localhost:0");
+    ASSERT_THAT_EXPECTED(listening_socket_or_error, llvm::Succeeded());
+    ListeningTCPSocket &listener = **listening_socket_or_error;
 
     Socket *accept_socket;
     auto connect_socket_up = std::make_unique<TCPSocket>(true);
-    error = connect_socket_up->Connect(
-        llvm::formatv("localhost:{0}", listen_socket_up->GetLocalPortNumber())
+    Status error = connect_socket_up->Connect(
+        llvm::formatv("localhost:{0}", listener.GetLocalPortNumber())
             .str());
     ASSERT_TRUE(error.Success());
-    ASSERT_TRUE(listen_socket_up->Accept(std::chrono::seconds(1), accept_socket)
-                    .Success());
+    ASSERT_TRUE(listener.Accept(std::chrono::seconds(1), accept_socket).Success());
 
     callback_count = 0;
     socketpair[0] = std::move(connect_socket_up);

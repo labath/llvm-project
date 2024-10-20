@@ -87,13 +87,13 @@ TestClient::launchCustom(StringRef Log, bool disable_stdio,
   const std::string &LocalhostIP = *LocalhostIPOrErr;
 
   Status status;
-  TCPSocket listen_socket(true);
-  status = listen_socket.Listen(LocalhostIP + ":0", 5);
-  if (status.Fail())
-    return status.ToError();
+  auto listening_socket_or_err = ListeningTCPSocket::Create(LocalhostIP+":0");
+  if (!listening_socket_or_err)
+    return listening_socket_or_err.takeError();
+  ListeningTCPSocket &listener = **listening_socket_or_err;
 
   args.AppendArgument(
-      formatv("{0}:{1}", LocalhostIP, listen_socket.GetLocalPortNumber())
+      formatv("{0}:{1}", LocalhostIP, listener.GetLocalPortNumber())
           .str());
 
   for (StringRef arg : ServerArgs)
@@ -122,7 +122,7 @@ TestClient::launchCustom(StringRef Log, bool disable_stdio,
 
   Socket *accept_socket;
   if (llvm::Error E =
-          listen_socket.Accept(2 * GetDefaultTimeout(), accept_socket)
+          listener.Accept(2 * GetDefaultTimeout(), accept_socket)
               .takeError())
     return E;
   auto Conn = std::make_unique<ConnectionFileDescriptor>(

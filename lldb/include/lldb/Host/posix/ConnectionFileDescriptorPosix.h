@@ -67,60 +67,43 @@ protected:
 
   void CloseCommandPipe();
 
-  lldb::ConnectionStatus
-  AcceptSocket(Socket::SocketProtocol socket_protocol,
-               llvm::StringRef socket_name,
-               llvm::function_ref<void(Socket &)> post_listen_callback,
-               Status *error_ptr);
+  llvm::Error ConnectSocket(Socket::SocketProtocol socket_protocol,
+                                       llvm::StringRef socket_name);
 
-  lldb::ConnectionStatus ConnectSocket(Socket::SocketProtocol socket_protocol,
-                                       llvm::StringRef socket_name,
-                                       Status *error_ptr);
+  llvm::Error AcceptTCP(llvm::StringRef host_and_port,
+                                   socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus AcceptTCP(llvm::StringRef host_and_port,
-                                   socket_id_callback_type socket_id_callback,
-                                   Status *error_ptr);
+  llvm::Error ConnectTCP(llvm::StringRef host_and_port,
+                                    socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus ConnectTCP(llvm::StringRef host_and_port,
-                                    socket_id_callback_type socket_id_callback,
-                                    Status *error_ptr);
+  llvm::Error ConnectUDP(llvm::StringRef args,
+                                    socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus ConnectUDP(llvm::StringRef args,
-                                    socket_id_callback_type socket_id_callback,
-                                    Status *error_ptr);
-
-  lldb::ConnectionStatus
+  llvm::Error
   ConnectNamedSocket(llvm::StringRef socket_name,
-                     socket_id_callback_type socket_id_callback,
-                     Status *error_ptr);
+                     socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus
+  llvm::Error
   AcceptNamedSocket(llvm::StringRef socket_name,
-                    socket_id_callback_type socket_id_callback,
-                    Status *error_ptr);
+                    socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus
+  llvm::Error
   AcceptAbstractSocket(llvm::StringRef socket_name,
-                       socket_id_callback_type socket_id_callback,
-                       Status *error_ptr);
+                       socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus
+  llvm::Error
   ConnectAbstractSocket(llvm::StringRef socket_name,
-                        socket_id_callback_type socket_id_callback,
-                        Status *error_ptr);
+                        socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus ConnectFD(llvm::StringRef args,
-                                   socket_id_callback_type socket_id_callback,
-                                   Status *error_ptr);
+  llvm::Error ConnectFD(llvm::StringRef args,
+                                   socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus ConnectFile(llvm::StringRef args,
-                                     socket_id_callback_type socket_id_callback,
-                                     Status *error_ptr);
+  llvm::Error ConnectFile(llvm::StringRef args,
+                                     socket_id_callback_type socket_id_callback);
 
-  lldb::ConnectionStatus
+  llvm::Error
   ConnectSerialPort(llvm::StringRef args,
-                    socket_id_callback_type socket_id_callback,
-                    Status *error_ptr);
+                    socket_id_callback_type socket_id_callback);
 
   lldb::IOObjectSP m_io_sp;
 
@@ -133,6 +116,11 @@ protected:
   std::string m_uri;
 
 private:
+  template<typename ListeningSocketType>
+  llvm::Error
+  AcceptSocket(llvm::StringRef socket_name,
+               llvm::function_ref<void(ListeningSocketType &)> post_listen_callback);
+
   ConnectionFileDescriptor(const ConnectionFileDescriptor &) = delete;
   const ConnectionFileDescriptor &
   operator=(const ConnectionFileDescriptor &) = delete;

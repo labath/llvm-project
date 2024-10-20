@@ -14,41 +14,56 @@
 #include <vector>
 
 namespace lldb_private {
+
+class ListeningDomainSocket;
+
 class DomainSocket : public Socket {
 public:
-  DomainSocket(NativeSocket socket, bool should_close);
-  explicit DomainSocket(bool should_close);
-
   using Pair =
       std::pair<std::unique_ptr<DomainSocket>, std::unique_ptr<DomainSocket>>;
   static llvm::Expected<Pair> CreatePair();
 
-  Status Connect(llvm::StringRef name) override;
-  Status Listen(llvm::StringRef name, int backlog) override;
+  using listener_type = ListeningDomainSocket;
 
-  using Socket::Accept;
-  llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
-  Accept(MainLoopBase &loop,
-         std::function<void(std::unique_ptr<Socket> socket)> sock_cb) override;
+  DomainSocket(NativeSocket socket, bool should_close);
+  explicit DomainSocket(bool should_close);
+
+  Status Connect(llvm::StringRef name) override;
 
   std::string GetRemoteConnectionURI() const override;
-
-  std::vector<std::string> GetListeningConnectionURI() const override;
 
   static llvm::Expected<std::unique_ptr<DomainSocket>>
   FromBoundNativeSocket(NativeSocket sockfd, bool should_close);
 
 protected:
-  DomainSocket(SocketProtocol protocol);
-  DomainSocket(SocketProtocol protocol, NativeSocket socket, bool should_close);
+  explicit DomainSocket(SocketProtocol protocol);
 
   virtual size_t GetNameOffset() const;
-  virtual void DeleteSocketFile(llvm::StringRef name);
   std::string GetSocketName() const;
+};
+
+class ListeningDomainSocket : public ListeningSocket {
+public:
+  static llvm::Expected<std::unique_ptr<ListeningDomainSocket>>
+  Create(llvm::StringRef name, int backlog = DefaultBacklog);
+
+  ~ListeningDomainSocket() override;
+
+  using socket_type = DomainSocket;
+
+  std::vector<std::string> GetConnectionURIs() const override;
+
+  using ListeningSocket::Accept;
+  llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
+  Accept(MainLoopBase &loop,
+         std::function<void(std::unique_ptr<Socket> socket)> sock_cb) override;
 
 private:
-  DomainSocket(NativeSocket socket, const DomainSocket &listen_socket);
+  NativeSocket m_socket;
+
+  ListeningDomainSocket(NativeSocket socket) : m_socket(socket) {}
 };
-}
+
+} // namespace lldb_private
 
 #endif // LLDB_HOST_POSIX_DOMAINSOCKET_H

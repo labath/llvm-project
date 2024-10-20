@@ -55,6 +55,10 @@ static bool SetSockAddr(llvm::StringRef name, const size_t name_offset,
   return true;
 }
 
+static void DeleteSocketFile(llvm::StringRef name) {
+  llvm::sys::fs::remove(name);
+}
+
 DomainSocket::DomainSocket(bool should_close)
     : DomainSocket(kInvalidSocketValue, should_close) {}
 
@@ -64,19 +68,7 @@ DomainSocket::DomainSocket(NativeSocket socket, bool should_close)
 }
 
 DomainSocket::DomainSocket(SocketProtocol protocol)
-    : Socket(protocol, /*should_close=*/true) {}
-
-DomainSocket::DomainSocket(NativeSocket socket,
-                           const DomainSocket &listen_socket)
-    : Socket(ProtocolUnixDomain, listen_socket.m_should_close_fd) {
-  m_socket = socket;
-}
-
-DomainSocket::DomainSocket(SocketProtocol protocol, NativeSocket socket,
-                           bool should_close)
-    : Socket(protocol, should_close) {
-  m_socket = socket;
-}
+    : Socket(protocol, true) {}
 
 llvm::Expected<DomainSocket::Pair> DomainSocket::CreatePair() {
   int sockets[2];
@@ -95,12 +87,11 @@ llvm::Expected<DomainSocket::Pair> DomainSocket::CreatePair() {
   }
 #endif
 
-  return Pair(std::unique_ptr<DomainSocket>(
-                  new DomainSocket(ProtocolUnixDomain, sockets[0],
-                                   /*should_close=*/true)),
-              std::unique_ptr<DomainSocket>(
-                  new DomainSocket(ProtocolUnixDomain, sockets[1],
-                                   /*should_close=*/true)));
+  return Pair(
+      std::unique_ptr<DomainSocket>(new DomainSocket(sockets[0],
+                                                     /*should_close=*/true)),
+      std::unique_ptr<DomainSocket>(new DomainSocket(sockets[1],
+                                                     /*should_close=*/true)));
 }
 
 Status DomainSocket::Connect(llvm::StringRef name) {
@@ -109,53 +100,63 @@ Status DomainSocket::Connect(llvm::StringRef name) {
   if (!SetSockAddr(name, GetNameOffset(), &saddr_un, saddr_un_len))
     return Status::FromErrorString("Failed to set socket address");
 
-  Status error;
-  m_socket = CreateSocket(kDomain, kType, 0, error);
-  if (error.Fail())
-    return error;
-  if (llvm::sys::RetryAfterSignal(-1, ::connect, GetNativeSocket(),
-                                  (struct sockaddr *)&saddr_un,
-                                  saddr_un_len) < 0)
-    SetLastError(error);
-
-  return error;
+  if (llvm::Expected<NativeSocket> socket = socket_detail::CreateSocket(kDomain, kType, 0)) {
+    m_socket = *socket;
+  } else {
+    m_socket = kInvalidSocketValue;
+    return Status::FromError(socket.takeError());
+  }
+  return Status::FromError(socket_detail::ConnectSocket(m_socket, reinterpret_cast<struct sockaddr *>(&saddr_un), saddr_un_len));
 }
 
-Status DomainSocket::Listen(llvm::StringRef name, int backlog) {
+llvm::Expected<std::unique_ptr<ListeningDomainSocket>> ListeningDomainSocket::Create(llvm::StringRef name, int backlog) {
   sockaddr_un saddr_un;
   socklen_t saddr_un_len;
-  if (!SetSockAddr(name, GetNameOffset(), &saddr_un, saddr_un_len))
-    return Status::FromErrorString("Failed to set socket address");
+  if (!SetSockAddr(name, /*name_offset=*/0, &saddr_un, saddr_un_len))
+    return llvm::createStringError("Failed to set socket address");
 
   DeleteSocketFile(name);
 
-  Status error;
-  m_socket = CreateSocket(kDomain, kType, 0, error);
-  if (error.Fail())
-    return error;
-  if (::bind(GetNativeSocket(), (struct sockaddr *)&saddr_un, saddr_un_len) ==
-      0)
-    if (::listen(GetNativeSocket(), backlog) == 0)
-      return error;
+  llvm::Expected<NativeSocket> socket = socket_detail::CreateSocket(kDomain, kType, 0);
+  if (!socket)
+    return socket.takeError();
+  if (llvm::Error err = socket_detail::BindSocket(*socket, reinterpret_cast<struct sockaddr *>(&saddr_un), saddr_un_len))
+    return err;
+  if (llvm::Error err = socket_detail::ListenSocket(*socket, backlog))
+    return err;
 
-  SetLastError(error);
-  return error;
+  return std::unique_ptr<ListeningDomainSocket>(new ListeningDomainSocket(*socket));
 }
 
-llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>> DomainSocket::Accept(
+ListeningDomainSocket::~ListeningDomainSocket() {
+  consumeError(socket_detail::CloseSocket(m_socket));
+}
+
+std::vector<std::string> ListeningDomainSocket::GetConnectionURIs() const {
+  struct sockaddr_un addr;
+  memset(&addr, 0, sizeof(struct sockaddr_un));
+  addr.sun_family = AF_UNIX;
+  socklen_t addr_len = sizeof(struct sockaddr_un);
+  if (::getsockname(m_socket, (struct sockaddr *)&addr, &addr_len) != 0)
+    return {};
+
+  return {llvm::formatv("unix-connect://{0}", addr.sun_path)};
+}
+
+llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>> ListeningDomainSocket::Accept(
     MainLoopBase &loop,
     std::function<void(std::unique_ptr<Socket> socket)> sock_cb) {
   // TODO: Refactor MainLoop to avoid the shared_ptr requirement.
-  auto io_sp = std::make_shared<DomainSocket>(GetNativeSocket(), false);
+  auto io_sp = std::make_shared<DomainSocket>(m_socket, false);
   auto cb = [this, sock_cb](MainLoopBase &loop) {
     Log *log = GetLog(LLDBLog::Host);
     Status error;
-    auto conn_fd = AcceptSocket(GetNativeSocket(), nullptr, nullptr, error);
-    if (error.Fail()) {
-      LLDB_LOG(log, "AcceptSocket({0}): {1}", GetNativeSocket(), error);
+    llvm::Expected<NativeSocket> conn_fd = socket_detail::AcceptSocket(m_socket, nullptr, nullptr);
+    if (!conn_fd) {
+      LLDB_LOG_ERROR(log, conn_fd.takeError(), "AcceptSocket({1}): {0}", m_socket);
       return;
     }
-    std::unique_ptr<DomainSocket> sock_up(new DomainSocket(conn_fd, *this));
+    std::unique_ptr<DomainSocket> sock_up(new DomainSocket(*conn_fd, /*should_close=*/true));
     sock_cb(std::move(sock_up));
   };
 
@@ -168,10 +169,6 @@ llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>> DomainSocket::Accept(
 }
 
 size_t DomainSocket::GetNameOffset() const { return 0; }
-
-void DomainSocket::DeleteSocketFile(llvm::StringRef name) {
-  llvm::sys::fs::remove(name);
-}
 
 std::string DomainSocket::GetSocketName() const {
   if (m_socket == kInvalidSocketValue)
@@ -203,20 +200,6 @@ std::string DomainSocket::GetRemoteConnectionURI() const {
   return llvm::formatv(
       "{0}://{1}",
       GetNameOffset() == 0 ? "unix-connect" : "unix-abstract-connect", name);
-}
-
-std::vector<std::string> DomainSocket::GetListeningConnectionURI() const {
-  if (m_socket == kInvalidSocketValue)
-    return {};
-
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(struct sockaddr_un));
-  addr.sun_family = AF_UNIX;
-  socklen_t addr_len = sizeof(struct sockaddr_un);
-  if (::getsockname(m_socket, (struct sockaddr *)&addr, &addr_len) != 0)
-    return {};
-
-  return {llvm::formatv("unix-connect://{0}", addr.sun_path)};
 }
 
 llvm::Expected<std::unique_ptr<DomainSocket>>

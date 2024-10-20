@@ -17,11 +17,15 @@
 #include <vector>
 
 namespace lldb_private {
+
+class ListeningTCPSocket;
+
 class TCPSocket : public Socket {
 public:
+  using listener_type = ListeningTCPSocket;
+
   explicit TCPSocket(bool should_close);
   TCPSocket(NativeSocket socket, bool should_close);
-  ~TCPSocket() override;
 
   using Pair =
       std::pair<std::unique_ptr<TCPSocket>, std::unique_ptr<TCPSocket>>;
@@ -41,32 +45,41 @@ public:
   // returns ip address string or empty string if error
   std::string GetRemoteIPAddress() const;
 
-  int SetOptionNoDelay();
-  int SetOptionReuseAddress();
+  llvm::Error SetOptionNoDelay();
+  llvm::Error SetOptionReuseAddress();
 
   Status Connect(llvm::StringRef name) override;
-  Status Listen(llvm::StringRef name, int backlog) override;
-
-  using Socket::Accept;
-  llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
-  Accept(MainLoopBase &loop,
-         std::function<void(std::unique_ptr<Socket> socket)> sock_cb) override;
-
-  Status CreateSocket(int domain);
 
   bool IsValid() const override;
 
   std::string GetRemoteConnectionURI() const override;
+};
 
-  std::vector<std::string> GetListeningConnectionURI() const override;
+class ListeningTCPSocket: public ListeningSocket {
+public:
+  static llvm::Expected<std::unique_ptr<ListeningTCPSocket>>
+  Create(llvm::StringRef name, int backlog = DefaultBacklog);
+
+  ~ListeningTCPSocket() override;
+
+  using socket_type = TCPSocket;
+
+  std::vector<std::string> GetConnectionURIs() const override;
+
+  using ListeningSocket::Accept;
+  llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>>
+  Accept(MainLoopBase &loop,
+         std::function<void(std::unique_ptr<Socket> socket)> sock_cb) override;
+
+  uint16_t GetLocalPortNumber() const;
 
 private:
-  TCPSocket(NativeSocket socket, const TCPSocket &listen_socket);
+  ListeningTCPSocket(llvm::DenseMap<int, SocketAddress> sockets)
+      : m_sockets(std::move(sockets)) {}
 
-  void CloseListenSockets();
-
-  std::map<int, SocketAddress> m_listen_sockets;
+  llvm::DenseMap<int, SocketAddress> m_sockets;
 };
-}
+
+} // namespace lldb_private
 
 #endif // LLDB_HOST_COMMON_TCPSOCKET_H

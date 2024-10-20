@@ -63,16 +63,12 @@ static Status DeleteForwardPortWithAdb(uint16_t local_port,
 }
 
 static Status FindUnusedPort(uint16_t &port) {
-  Status error;
-  std::unique_ptr<TCPSocket> tcp_socket(new TCPSocket(true));
-  if (error.Fail())
-    return error;
-
-  error = tcp_socket->Listen("127.0.0.1:0", 1);
-  if (error.Success())
-    port = tcp_socket->GetLocalPortNumber();
-
-  return error;
+  auto listening_socket_or_error = ListeningTCPSocket::Create("localhost:0");
+  if (!listening_socket_or_error)
+    return Status::FromError(listening_socket_or_error.takeError());
+  ListeningTCPSocket &listener = **listening_socket_or_error;
+  port = listener.GetLocalPortNumber();
+  return Status();
 }
 
 PlatformAndroidRemoteGDBServer::~PlatformAndroidRemoteGDBServer() {

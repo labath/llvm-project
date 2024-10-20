@@ -27,12 +27,12 @@ static const int kType = SOCK_DGRAM;
 
 static const char *g_not_supported_error = "Not supported";
 
-UDPSocket::UDPSocket(NativeSocket socket)
-    : Socket(ProtocolUdp, /*should_close=*/true) {
+UDPSocket::UDPSocket(NativeSocket socket) : Socket(ProtocolUdp, true) {
   m_socket = socket;
 }
 
-UDPSocket::UDPSocket(bool should_close) : Socket(ProtocolUdp, should_close) {}
+UDPSocket::UDPSocket(bool should_close)
+    : Socket(ProtocolUdp, should_close) {}
 
 size_t UDPSocket::Send(const void *buf, const size_t num_bytes) {
   return ::sendto(m_socket, static_cast<const char *>(buf), num_bytes, 0,
@@ -43,10 +43,6 @@ Status UDPSocket::Connect(llvm::StringRef name) {
   return Status::FromErrorStringWithFormat("%s", g_not_supported_error);
 }
 
-Status UDPSocket::Listen(llvm::StringRef name, int backlog) {
-  return Status::FromErrorStringWithFormat("%s", g_not_supported_error);
-}
-
 llvm::Expected<std::unique_ptr<UDPSocket>>
 UDPSocket::CreateConnected(llvm::StringRef name) {
   std::unique_ptr<UDPSocket> socket;
@@ -54,7 +50,6 @@ UDPSocket::CreateConnected(llvm::StringRef name) {
   Log *log = GetLog(LLDBLog::Connection);
   LLDB_LOG(log, "host/port = {0}", name);
 
-  Status error;
   llvm::Expected<HostAndPort> host_port = DecodeHostAndPort(name);
   if (!host_port)
     return host_port.takeError();
@@ -71,34 +66,35 @@ UDPSocket::CreateConnected(llvm::StringRef name) {
   int err = ::getaddrinfo(host_port->hostname.c_str(), std::to_string(host_port->port).c_str(), &hints,
                           &service_info_list);
   if (err != 0) {
-    error = Status::FromErrorStringWithFormat(
+     return Status::FromErrorStringWithFormat(
 #if defined(_WIN32) && defined(UNICODE)
         "getaddrinfo(%s, %d, &hints, &info) returned error %i (%S)",
 #else
         "getaddrinfo(%s, %d, &hints, &info) returned error %i (%s)",
 #endif
-        host_port->hostname.c_str(), host_port->port, err, gai_strerror(err));
-    return error.ToError();
+        host_port->hostname.c_str(), host_port->port, err, gai_strerror(err)).takeError();
   }
 
+  llvm::Error all_errors = llvm::Error::success();
   for (struct addrinfo *service_info_ptr = service_info_list;
        service_info_ptr != nullptr;
        service_info_ptr = service_info_ptr->ai_next) {
-    auto send_fd =
-        CreateSocket(service_info_ptr->ai_family, service_info_ptr->ai_socktype,
-                     service_info_ptr->ai_protocol, error);
-    if (error.Success()) {
-      socket.reset(new UDPSocket(send_fd));
+    if (llvm::Expected<NativeSocket> sockfd =
+        socket_detail::CreateSocket(service_info_ptr->ai_family, service_info_ptr->ai_socktype,
+                     service_info_ptr->ai_protocol)) {
+      socket.reset(new UDPSocket(*sockfd));
       socket->m_sockaddr = service_info_ptr;
       break;
-    } else
-      continue;
+    } else {
+      all_errors = joinErrors(std::move(all_errors), sockfd.takeError());
+    }
   }
 
   ::freeaddrinfo(service_info_list);
 
   if (!socket)
-    return error.ToError();
+    return all_errors;
+  consumeError(std::move(all_errors));
 
   SocketAddress bind_addr;
 
@@ -108,10 +104,8 @@ UDPSocket::CreateConnected(llvm::StringRef name) {
                                      ? bind_addr.SetToLocalhost(kDomain, host_port->port)
                                      : bind_addr.SetToAnyAddress(kDomain, host_port->port);
 
-  if (!bind_addr_success) {
-    error = Status::FromErrorString("Failed to get hostspec to bind for");
-    return error.ToError();
-  }
+  if (!bind_addr_success)
+    return llvm::createStringError("Failed to get hostspec to bind for");
 
   bind_addr.SetPort(0); // Let the source port # be determined dynamically
 

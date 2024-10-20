@@ -23,6 +23,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/WindowsError.h"
+#include "llvm/Support/Process.h"
 
 #if LLDB_ENABLE_POSIX
 #include "lldb/Host/posix/DomainSocket.h"
@@ -61,6 +62,16 @@ static bool IsInterrupted() {
 #else
   return errno == EINTR;
 #endif
+}
+
+static llvm::Error GetLastError() {
+  std::error_code EC;
+#ifdef _WIN32
+  EC = llvm::mapWindowsError(WSAGetLastError());
+#else
+  EC = llvm::errnoAsErrorCode();
+#endif
+  return llvm::errorCodeToError(EC);
 }
 
 SharedSocket::SharedSocket(const Socket *socket, Status &error) {
@@ -268,21 +279,6 @@ Socket::TcpConnect(llvm::StringRef host_and_port) {
   return error.ToError();
 }
 
-llvm::Expected<std::unique_ptr<TCPSocket>>
-Socket::TcpListen(llvm::StringRef host_and_port, int backlog) {
-  Log *log = GetLog(LLDBLog::Connection);
-  LLDB_LOG(log, "host_and_port = {0}", host_and_port);
-
-  std::unique_ptr<TCPSocket> listen_socket(
-      new TCPSocket(/*should_close=*/true));
-
-  Status error = listen_socket->Listen(host_and_port, backlog);
-  if (error.Fail())
-    return error.ToError();
-
-  return std::move(listen_socket);
-}
-
 llvm::Expected<std::unique_ptr<UDPSocket>>
 Socket::UdpConnect(llvm::StringRef host_and_port) {
   return UDPSocket::CreateConnected(host_and_port);
@@ -325,7 +321,7 @@ Status Socket::Read(void *buf, size_t &num_bytes) {
   } while (bytes_received < 0 && IsInterrupted());
 
   if (bytes_received < 0) {
-    SetLastError(error);
+    error = Status::FromError(GetLastError());
     num_bytes = 0;
   } else
     num_bytes = bytes_received;
@@ -353,7 +349,7 @@ Status Socket::Write(const void *buf, size_t &num_bytes) {
   } while (bytes_sent < 0 && IsInterrupted());
 
   if (bytes_sent < 0) {
-    SetLastError(error);
+    error = Status::FromError(GetLastError());
     num_bytes = 0;
   } else
     num_bytes = bytes_sent;
@@ -381,14 +377,7 @@ Status Socket::Close() {
   LLDB_LOGF(log, "%p Socket::Close (fd = %" PRIu64 ")",
             static_cast<void *>(this), static_cast<uint64_t>(m_socket));
 
-  bool success = CloseSocket(m_socket) == 0;
-  // A reference to a FD was passed in, set it to an invalid value
-  m_socket = kInvalidSocketValue;
-  if (!success) {
-    SetLastError(error);
-  }
-
-  return error;
+  return Status::FromError(socket_detail::CloseSocket(std::exchange(m_socket, -1)));
 }
 
 int Socket::GetOption(NativeSocket sockfd, int level, int option_name,
@@ -400,59 +389,117 @@ int Socket::GetOption(NativeSocket sockfd, int level, int option_name,
                       &option_value_size);
 }
 
-int Socket::SetOption(NativeSocket sockfd, int level, int option_name,
-                      int option_value) {
-  set_socket_option_arg_type option_value_p =
-      reinterpret_cast<set_socket_option_arg_type>(&option_value);
-  return ::setsockopt(sockfd, level, option_name, option_value_p,
-                      sizeof(option_value));
-}
-
 size_t Socket::Send(const void *buf, const size_t num_bytes) {
   return ::send(m_socket, static_cast<const char *>(buf), num_bytes, 0);
 }
 
-void Socket::SetLastError(Status &error) {
-#if defined(_WIN32)
-  error = Status(::WSAGetLastError(), lldb::eErrorTypeWin32);
-#else
-  error = Status::FromErrno();
-#endif
-}
-
-Status Socket::GetLastError() {
-  std::error_code EC;
-#ifdef _WIN32
-  EC = llvm::mapWindowsError(WSAGetLastError());
-#else
-  EC = std::error_code(errno, std::generic_category());
-#endif
-  return EC;
-}
-
-int Socket::CloseSocket(NativeSocket sockfd) {
-#ifdef _WIN32
-  return ::closesocket(sockfd);
-#else
-  return ::close(sockfd);
-#endif
-}
-
-NativeSocket Socket::CreateSocket(const int domain, const int type,
-                                  const int protocol, Status &error) {
-  error.Clear();
+llvm::Expected<NativeSocket> socket_detail::CreateSocket(const int domain,
+                                                         const int type,
+                                                         const int protocol) {
   auto socket_type = type;
 #ifdef SOCK_CLOEXEC
   socket_type |= SOCK_CLOEXEC;
 #endif
   auto sock = ::socket(domain, socket_type, protocol);
-  if (sock == kInvalidSocketValue)
-    SetLastError(error);
+  if (sock == Socket::kInvalidSocketValue)
+    return GetLastError();
 
   return sock;
 }
 
-Status Socket::Accept(const Timeout<std::micro> &timeout, Socket *&socket) {
+llvm::Error socket_detail::CloseSocket(NativeSocket sockfd) {
+#ifdef _WIN32
+  if (::closesocket(sockfd) == -1)
+    return GetLastError();
+#else
+  if (std::error_code ec = llvm::sys::Process::SafelyCloseFileDescriptor(sockfd))
+    return llvm::errorCodeToError(ec);
+#endif
+  return llvm::Error::success();
+}
+
+llvm::Error socket_detail::BindSocket(NativeSocket sockfd, const struct sockaddr *address, socklen_t address_len) {
+  if (::bind(sockfd, address, address_len) == -1)
+    return GetLastError();
+  return llvm::Error::success();
+}
+
+llvm::Error socket_detail::ListenSocket(NativeSocket sockfd, int backlog) {
+  if (::listen(sockfd, backlog) == -1)
+    return GetLastError();
+  return llvm::Error::success();
+}
+
+llvm::Error socket_detail::ConnectSocket(NativeSocket sockfd, const struct sockaddr *address, socklen_t address_len) {
+  if (llvm::sys::RetryAfterSignal(-1, ::connect, sockfd,
+        address, address_len) == -1)
+    return GetLastError();
+  return llvm::Error::success();
+}
+
+llvm::Expected<NativeSocket> socket_detail::AcceptSocket(NativeSocket sockfd, struct sockaddr *addr,
+                                  socklen_t *addrlen) {
+#if defined(ANDROID_USE_ACCEPT_WORKAROUND)
+  // Hack:
+  // This enables static linking lldb-server to an API 21 libc, but still
+  // having it run on older devices. It is necessary because API 21 libc's
+  // implementation of accept() uses the accept4 syscall(), which is not
+  // available in older kernels. Using an older libc would fix this issue, but
+  // introduce other ones, as the old libraries were quite buggy.
+  int fd = syscall(__NR_accept, sockfd, addr, addrlen);
+  if (fd >= 0) {
+    int flags = ::fcntl(fd, F_GETFD);
+    if (flags != -1 && ::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != -1)
+      return fd;
+    llvm::Error err = GetLastError();
+    close(fd);
+    return err;
+  }
+  return fd;
+#elif defined(SOCK_CLOEXEC) && defined(HAVE_ACCEPT4)
+  int flags = SOCK_CLOEXEC;
+  NativeSocket fd = llvm::sys::RetryAfterSignal(
+      static_cast<NativeSocket>(-1), ::accept4, sockfd, addr, addrlen, flags);
+#else
+  NativeSocket fd = llvm::sys::RetryAfterSignal(
+      static_cast<NativeSocket>(-1), ::accept, sockfd, addr, addrlen);
+#endif
+  if (fd == Socket::kInvalidSocketValue)
+    return GetLastError();
+  return fd;
+}
+
+llvm::Error socket_detail::SetSocketOption(NativeSocket sockfd, int level, int option_name,
+                      int option_value) {
+  set_socket_option_arg_type option_value_p =
+      reinterpret_cast<set_socket_option_arg_type>(&option_value);
+  if(::setsockopt(sockfd, level, option_name, option_value_p,
+                      sizeof(option_value)) == -1)
+    return GetLastError();
+  return llvm::Error::success();
+}
+
+llvm::Expected<std::unique_ptr<ListeningSocket>>
+ListeningSocket::Create(Socket::SocketProtocol protocol,
+                        llvm::StringRef address, int backlog) {
+  switch (protocol) {
+  case Socket::ProtocolTcp:
+    return ListeningTCPSocket::Create(address, backlog);
+  case Socket::ProtocolUnixDomain:
+#if LLDB_ENABLE_POSIX
+    return ListeningDomainSocket::Create(address, backlog);
+#endif
+  case Socket::ProtocolUnixAbstract:
+#ifdef __linux__
+    return ListeningAbstractSocket::Create(address, backlog);
+#endif
+  case Socket::ProtocolUdp:
+    return llvm::errorCodeToError(make_error_code(std::errc::operation_not_supported));
+  }
+  llvm_unreachable("Fully covered switch!");
+}
+
+Status ListeningSocket::Accept(const Timeout<std::micro> &timeout, Socket *&socket) {
   socket = nullptr;
   MainLoop accept_loop;
   llvm::Expected<std::vector<MainLoopBase::ReadHandleUP>> expected_handles =
@@ -472,22 +519,6 @@ Status Socket::Accept(const Timeout<std::micro> &timeout, Socket *&socket) {
   if (socket)
     return Status();
   return Status(std::make_error_code(std::errc::timed_out));
-}
-
-NativeSocket Socket::AcceptSocket(NativeSocket sockfd, struct sockaddr *addr,
-                                  socklen_t *addrlen, Status &error) {
-  error.Clear();
-#if defined(SOCK_CLOEXEC) && defined(HAVE_ACCEPT4)
-  int flags = SOCK_CLOEXEC;
-  NativeSocket fd = llvm::sys::RetryAfterSignal(
-      static_cast<NativeSocket>(-1), ::accept4, sockfd, addr, addrlen, flags);
-#else
-  NativeSocket fd = llvm::sys::RetryAfterSignal(
-      static_cast<NativeSocket>(-1), ::accept, sockfd, addr, addrlen);
-#endif
-  if (fd == kInvalidSocketValue)
-    SetLastError(error);
-  return fd;
 }
 
 llvm::raw_ostream &lldb_private::operator<<(llvm::raw_ostream &OS,
