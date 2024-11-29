@@ -23,7 +23,6 @@ namespace lldb_private::plugin {
 namespace dwarf {
 class DWARFUnit;
 class DWARFCompileUnit;
-class NameToDIE;
 class SymbolFileDWARF;
 class SymbolFileDWARFDwo;
 

@@ -9,41 +9,37 @@
 #include "NameToDIE.h"
 #include "DWARFUnit.h"
 #include "lldb/Core/DataFileCache.h"
-#include "lldb/Symbol/ObjectFile.h"
-#include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/DataEncoder.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/Utility/StreamString.h"
 #include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::plugin::dwarf;
 
-void NameToDIE::Finalize() {
-  m_map.Sort(std::less<DIERef>());
-  m_map.SizeToFit();
+void NameToDIE::Finalize() { llvm::sort(m_map, &NameToDIE::Compare); }
+
+void NameToDIE::Insert(llvm::StringRef name, const DIERef &die_ref) {
+  m_map.emplace_back(name, die_ref);
 }
 
-void NameToDIE::Insert(ConstString name, const DIERef &die_ref) {
-  m_map.Append(name, die_ref);
-}
-
-bool NameToDIE::Find(ConstString name,
+bool NameToDIE::Find(llvm::StringRef name,
                      llvm::function_ref<bool(DIERef ref)> callback) const {
-  for (const auto &entry : m_map.equal_range(name))
-    if (!callback(entry.value))
+  for (const auto &[_, ref] : llvm::make_range(
+           std::equal_range(m_map.begin(), m_map.end(), Pair(name, DIERef(0)),
+                            &NameToDIE::Compare)))
+    if (!callback(ref))
       return false;
   return true;
 }
 
 bool NameToDIE::Find(const RegularExpression &regex,
                      llvm::function_ref<bool(DIERef ref)> callback) const {
-  for (const auto &entry : m_map)
-    if (regex.Execute(entry.cstring.GetCString())) {
-      if (!callback(entry.value))
+  for (const auto &[name, ref] : m_map)
+    if (regex.Execute(name)) {
+      if (!callback(ref))
         return false;
     }
   return true;
@@ -52,9 +48,7 @@ bool NameToDIE::Find(const RegularExpression &regex,
 void NameToDIE::FindAllEntriesForUnit(
     DWARFUnit &s_unit, llvm::function_ref<bool(DIERef ref)> callback) const {
   const DWARFUnit &ns_unit = s_unit.GetNonSkeletonUnit();
-  const uint32_t size = m_map.GetSize();
-  for (uint32_t i = 0; i < size; ++i) {
-    const DIERef &die_ref = m_map.GetValueAtIndexUnchecked(i);
+  for (const auto &[_, die_ref] : m_map) {
     if (ns_unit.GetSymbolFileDWARF().GetFileIndex() == die_ref.file_index() &&
         ns_unit.GetDebugSection() == die_ref.section() &&
         ns_unit.GetOffset() <= die_ref.die_offset() &&
@@ -66,49 +60,39 @@ void NameToDIE::FindAllEntriesForUnit(
 }
 
 void NameToDIE::Dump(Stream *s) {
-  const uint32_t size = m_map.GetSize();
-  for (uint32_t i = 0; i < size; ++i) {
-    s->Format("{0} \"{1}\"\n", m_map.GetValueAtIndexUnchecked(i),
-              m_map.GetCStringAtIndexUnchecked(i));
-  }
+  for (const auto &[name, ref] : m_map)
+    s->Format("{0} \"{1}\"\n", name, ref);
 }
 
 void NameToDIE::ForEach(
-    std::function<bool(ConstString name, const DIERef &die_ref)> const
-        &callback) const {
-  const uint32_t size = m_map.GetSize();
-  for (uint32_t i = 0; i < size; ++i) {
-    if (!callback(m_map.GetCStringAtIndexUnchecked(i),
-                  m_map.GetValueAtIndexUnchecked(i)))
+    llvm::function_ref<bool(llvm::StringRef name, const DIERef &die_ref)>
+        callback) const {
+  for (const auto &[name, ref] : m_map)
+    if (!callback(name, ref))
       break;
-  }
 }
 
 void NameToDIE::Append(const NameToDIE &other) {
-  const uint32_t size = other.m_map.GetSize();
-  for (uint32_t i = 0; i < size; ++i) {
-    m_map.Append(other.m_map.GetCStringAtIndexUnchecked(i),
-                 other.m_map.GetValueAtIndexUnchecked(i));
-  }
+  m_map.insert(m_map.end(), other.m_map.begin(), other.m_map.end());
 }
 
 constexpr llvm::StringLiteral kIdentifierNameToDIE("N2DI");
 
 bool NameToDIE::Decode(const DataExtractor &data, lldb::offset_t *offset_ptr,
                        const StringTableReader &strtab) {
-  m_map.Clear();
+  m_map.clear();
   llvm::StringRef identifier((const char *)data.GetData(offset_ptr, 4), 4);
   if (identifier != kIdentifierNameToDIE)
     return false;
   const uint32_t count = data.GetU32(offset_ptr);
-  m_map.Reserve(count);
+  m_map.reserve(count);
   for (uint32_t i = 0; i < count; ++i) {
     llvm::StringRef str(strtab.Get(data.GetU32(offset_ptr)));
     // No empty strings allowed in the name to DIE maps.
     if (str.empty())
       return false;
     if (std::optional<DIERef> die_ref = DIERef::Decode(data, offset_ptr))
-      m_map.Append(ConstString(str), *die_ref);
+      m_map.emplace_back(str, *die_ref);
     else
       return false;
   }
@@ -121,31 +105,21 @@ bool NameToDIE::Decode(const DataExtractor &data, lldb::offset_t *offset_ptr,
   // name map to ensure name lookups succeed. If we encode and decode within
   // the same process we wouldn't need to sort, so unit testing didn't catch
   // this issue when first checked in.
-  m_map.Sort(std::less<DIERef>());
+  Finalize();
   return true;
 }
 
 void NameToDIE::Encode(DataEncoder &encoder, ConstStringTable &strtab) const {
   encoder.AppendData(kIdentifierNameToDIE);
-  encoder.AppendU32(m_map.GetSize());
-  for (const auto &entry : m_map) {
+  encoder.AppendU32(m_map.size());
+  for (const auto &[name, ref] : m_map) {
     // Make sure there are no empty strings.
-    assert((bool)entry.cstring);
-    encoder.AppendU32(strtab.Add(entry.cstring));
-    entry.value.Encode(encoder);
+    assert(!name.empty());
+    encoder.AppendU32(strtab.Add(ConstString(name)));
+    ref.Encode(encoder);
   }
 }
 
 bool NameToDIE::operator==(const NameToDIE &rhs) const {
-  const size_t size = m_map.GetSize();
-  if (size != rhs.m_map.GetSize())
-    return false;
-  for (size_t i = 0; i < size; ++i) {
-    if (m_map.GetCStringAtIndex(i) != rhs.m_map.GetCStringAtIndex(i))
-      return false;
-    if (m_map.GetValueRefAtIndexUnchecked(i) !=
-        rhs.m_map.GetValueRefAtIndexUnchecked(i))
-      return false;
-  }
-  return true;
+  return m_map == rhs.m_map;
 }

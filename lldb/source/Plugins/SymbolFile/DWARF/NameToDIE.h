@@ -9,12 +9,9 @@
 #ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_NAMETODIE_H
 #define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_NAMETODIE_H
 
-#include <functional>
-
 #include "DIERef.h"
-#include "lldb/Core/UniqueCStringMap.h"
-#include "lldb/Core/dwarf.h"
-#include "lldb/lldb-defines.h"
+#include <functional>
+#include <vector>
 
 namespace lldb_private::plugin {
 namespace dwarf {
@@ -28,13 +25,13 @@ public:
 
   void Dump(Stream *s);
 
-  void Insert(ConstString name, const DIERef &die_ref);
+  void Insert(llvm::StringRef name, const DIERef &die_ref);
 
   void Append(const NameToDIE &other);
 
   void Finalize();
 
-  bool Find(ConstString name,
+  bool Find(llvm::StringRef name,
             llvm::function_ref<bool(DIERef ref)> callback) const;
 
   bool Find(const RegularExpression &regex,
@@ -46,8 +43,8 @@ public:
                         llvm::function_ref<bool(DIERef ref)> callback) const;
 
   void
-  ForEach(std::function<bool(ConstString name, const DIERef &die_ref)> const
-              &callback) const;
+  ForEach(llvm::function_ref<bool(llvm::StringRef name, const DIERef &die_ref)>
+              callback) const;
 
   /// Decode a serialized version of this object from data.
   ///
@@ -81,12 +78,18 @@ public:
   /// Used for unit testing the encoding and decoding.
   bool operator==(const NameToDIE &rhs) const;
 
-  bool IsEmpty() const { return m_map.IsEmpty(); }
+  bool IsEmpty() const { return m_map.empty(); }
 
-  void Clear() { m_map.Clear(); }
+  void Clear() { m_map.clear(); }
 
 protected:
-  UniqueCStringMap<DIERef> m_map;
+  using Pair = std::pair<llvm::StringRef, DIERef>;
+
+  static bool Compare(const Pair &lhs, const Pair &rhs) {
+    return lhs.first < rhs.first;
+  }
+
+  std::vector<Pair> m_map;
 };
 } // namespace dwarf
 } // namespace lldb_private::plugin

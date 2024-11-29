@@ -320,42 +320,17 @@ void ManualDWARFIndex::IndexUnitImpl(DWARFUnit &unit,
       if (has_address) {
         if (name) {
           bool is_objc_method = false;
-          if (cu_language == eLanguageTypeObjC ||
-              cu_language == eLanguageTypeObjC_plus_plus) {
-            std::optional<const ObjCLanguage::MethodName> objc_method =
-                ObjCLanguage::MethodName::Create(name, true);
-            if (objc_method) {
-              is_objc_method = true;
-              ConstString class_name_with_category(
-                  objc_method->GetClassNameWithCategory());
-              ConstString objc_selector_name(objc_method->GetSelector());
-              ConstString objc_fullname_no_category_name(
-                  objc_method->GetFullNameWithoutCategory().c_str());
-              ConstString class_name_no_category(objc_method->GetClassName());
-              set.function_fullnames.Insert(ConstString(name), ref);
-              if (class_name_with_category)
-                set.objc_class_selectors.Insert(class_name_with_category, ref);
-              if (class_name_no_category &&
-                  class_name_no_category != class_name_with_category)
-                set.objc_class_selectors.Insert(class_name_no_category, ref);
-              if (objc_selector_name)
-                set.function_selectors.Insert(objc_selector_name, ref);
-              if (objc_fullname_no_category_name)
-                set.function_fullnames.Insert(objc_fullname_no_category_name,
-                                              ref);
-            }
-          }
           // If we have a mangled name, then the DW_AT_name attribute is
           // usually the method name without the class or any parameters
           bool is_method = DWARFDIE(&unit, &die).IsMethod();
 
           if (is_method)
-            set.function_methods.Insert(ConstString(name), ref);
+            set.function_methods.Insert(name, ref);
           else
-            set.function_basenames.Insert(ConstString(name), ref);
+            set.function_basenames.Insert(name, ref);
 
           if (!is_method && !mangled_cstr && !is_objc_method)
-            set.function_fullnames.Insert(ConstString(name), ref);
+            set.function_fullnames.Insert(name, ref);
         }
         if (mangled_cstr) {
           // Make sure our mangled name isn't the same string table entry as
@@ -365,7 +340,7 @@ void ManualDWARFIndex::IndexUnitImpl(DWARFUnit &unit,
           if (name && name != mangled_cstr &&
               ((mangled_cstr[0] == '_') ||
                (::strcmp(name, mangled_cstr) != 0))) {
-            set.function_fullnames.Insert(ConstString(mangled_cstr), ref);
+            set.function_fullnames.Insert(mangled_cstr, ref);
           }
         }
       }
@@ -383,15 +358,15 @@ void ManualDWARFIndex::IndexUnitImpl(DWARFUnit &unit,
     case DW_TAG_union_type:
     case DW_TAG_unspecified_type:
       if (name && !is_declaration)
-        set.types.Insert(ConstString(name), ref);
+        set.types.Insert(name, ref);
       if (mangled_cstr && !is_declaration)
-        set.types.Insert(ConstString(mangled_cstr), ref);
+        set.types.Insert(mangled_cstr, ref);
       break;
 
     case DW_TAG_namespace:
     case DW_TAG_imported_declaration:
       if (name)
-        set.namespaces.Insert(ConstString(name), ref);
+        set.namespaces.Insert(name, ref);
       break;
 
     case DW_TAG_member: {
@@ -420,7 +395,7 @@ void ManualDWARFIndex::IndexUnitImpl(DWARFUnit &unit,
         // entries
         if (mangled_cstr && name != mangled_cstr &&
             ((mangled_cstr[0] == '_') || (::strcmp(name, mangled_cstr) != 0))) {
-          set.globals.Insert(ConstString(mangled_cstr), ref);
+          set.globals.Insert(mangled_cstr, ref);
         }
       }
       break;
