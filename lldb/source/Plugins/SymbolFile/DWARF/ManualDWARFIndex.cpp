@@ -26,6 +26,7 @@
 #include <atomic>
 #include <chrono>
 #include <optional>
+#include <stdbool.h>
 
 using namespace lldb_private;
 using namespace lldb;
@@ -148,7 +149,6 @@ void ManualDWARFIndex::Index() {
     NameToDIE &result = m_set.*index;
     for (auto &set : sets)
       result.Append(set.*index);
-    result.Finalize();
     progress.Increment();
   };
 

@@ -10,6 +10,8 @@
 #define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_NAMETODIE_H
 
 #include "DIERef.h"
+#include "llvm/ADT/DenseMap.h"
+#include <cstddef>
 #include <functional>
 #include <vector>
 
@@ -19,6 +21,8 @@ class DWARFUnit;
 
 class NameToDIE {
 public:
+  using Pair = std::pair<llvm::StringRef, DIERef>;
+  
   NameToDIE() : m_map() {}
 
   ~NameToDIE() = default;
@@ -28,8 +32,7 @@ public:
   void Insert(llvm::StringRef name, const DIERef &die_ref);
 
   void Append(const NameToDIE &other);
-
-  void Finalize();
+  void Reserve(size_t count) { m_map.reserve(count); }
 
   bool Find(llvm::StringRef name,
             llvm::function_ref<bool(DIERef ref)> callback) const;
@@ -83,13 +86,12 @@ public:
   void Clear() { m_map.clear(); }
 
 protected:
-  using Pair = std::pair<llvm::StringRef, DIERef>;
 
   static bool Compare(const Pair &lhs, const Pair &rhs) {
     return lhs.first < rhs.first;
   }
 
-  std::vector<Pair> m_map;
+  llvm::DenseMap<llvm::StringRef, std::vector<DIERef>> m_map;
 };
 } // namespace dwarf
 } // namespace lldb_private::plugin
