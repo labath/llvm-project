@@ -50,8 +50,8 @@ void NameToDIE::FindAllEntriesForUnit(
   const DWARFUnit &ns_unit = s_unit.GetNonSkeletonUnit();
   for (const auto &[_, refs] : m_map) {
     for (const auto &die_ref : refs) {
-      if (ns_unit.GetSymbolFileDWARF().GetFileIndex() == die_ref.file_index() &&
-          ns_unit.GetDebugSection() == die_ref.section() &&
+      if (
+          ns_unit.GetDebugSection() == die_ref.section() &&ns_unit.GetSymbolFileDWARF().GetFileIndex() == die_ref.file_index() &&
           ns_unit.GetOffset() <= die_ref.die_offset() &&
           die_ref.die_offset() < ns_unit.GetNextUnitOffset()) {
         if (!callback(die_ref))
@@ -76,10 +76,17 @@ void NameToDIE::ForEach(
         return;
 }
 
-void NameToDIE::Append(const NameToDIE &other) {
-  for (const auto &[name, refs] : other.m_map) {
-    auto &my_refs = m_map[name];
-    my_refs.insert(my_refs.end(), refs.begin(), refs.end());
+void NameToDIE::Append(const NameToDIEX &other) {
+  const char *prev_name = nullptr;
+  auto it = m_map.end();
+  for (const auto &[name, ref] : other.m_map) {
+    if (name == prev_name) {
+      it->second.push_back(ref);
+    } else {
+      prev_name = name;
+      it = m_map.try_emplace(name).first;
+      it->second.push_back(ref);
+    }
   }
 }
 

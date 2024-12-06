@@ -19,10 +19,19 @@ namespace lldb_private::plugin {
 namespace dwarf {
 class DWARFUnit;
 
+class NameToDIEX {
+public:
+  void Insert(const char *name, DIERef die_ref) {
+    m_map.emplace_back(name, die_ref);
+  }
+
+  void Finalize() { llvm::sort(m_map, llvm::less_first()); }
+
+  std::vector<std::pair<const char *, DIERef>> m_map;
+};
+
 class NameToDIE {
 public:
-  using Pair = std::pair<llvm::StringRef, DIERef>;
-  
   NameToDIE() : m_map() {}
 
   ~NameToDIE() = default;
@@ -31,7 +40,7 @@ public:
 
   void Insert(llvm::StringRef name, const DIERef &die_ref);
 
-  void Append(const NameToDIE &other);
+  void Append(const NameToDIEX &other);
   void Reserve(size_t count) { m_map.reserve(count); }
 
   bool Find(llvm::StringRef name,
@@ -87,11 +96,7 @@ public:
 
 protected:
 
-  static bool Compare(const Pair &lhs, const Pair &rhs) {
-    return lhs.first < rhs.first;
-  }
-
-  llvm::DenseMap<llvm::StringRef, std::vector<DIERef>> m_map;
+  llvm::DenseMap<llvm::StringRef, llvm::SmallVector<DIERef, 2>> m_map;
 };
 } // namespace dwarf
 } // namespace lldb_private::plugin
