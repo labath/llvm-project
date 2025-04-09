@@ -12,11 +12,16 @@
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 
+#include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/Threading.h"
 
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
+#include <sys/auxv.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -28,8 +33,13 @@ using namespace lldb_private;
 
 namespace {
 struct HostInfoLinuxFields {
+  llvm::SmallString<0> likely_startup_cwd;
+
   llvm::once_flag m_distribution_once_flag;
   std::string m_distribution_id;
+
+  llvm::once_flag program_filespec_flag;
+  FileSpec program_filespec;
 };
 } // namespace
 
@@ -39,6 +49,7 @@ void HostInfoLinux::Initialize(SharedLibraryDirectoryHelper *helper) {
   HostInfoPosix::Initialize(helper);
 
   g_fields = new HostInfoLinuxFields();
+  llvm::sys::fs::current_path(g_fields->likely_startup_cwd);
 }
 
 void HostInfoLinux::Terminate() {
@@ -124,18 +135,31 @@ llvm::StringRef HostInfoLinux::GetDistributionId() {
 }
 
 FileSpec HostInfoLinux::GetProgramFileSpec() {
-  static FileSpec g_program_filespec;
-
-  if (!g_program_filespec) {
-    char exe_path[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (len > 0) {
-      exe_path[len] = 0;
-      g_program_filespec.SetFile(exe_path, FileSpec::Style::native);
+  llvm::call_once(g_fields->program_filespec_flag, [] {
+    FileSpec auxv_path;
+    if (const char *execfn =
+            reinterpret_cast<const char *>(getauxval(AT_EXECFN))) {
+      auxv_path.SetFile(execfn, FileSpec::Style::native);
+      auxv_path.MakeAbsolute(FileSpec(g_fields->likely_startup_cwd));
     }
-  }
 
-  return g_program_filespec;
+    FileSpec proc_path;
+    char storage[PATH_MAX];
+    if (ssize_t len = readlink("/proc/self/exe", storage, sizeof(storage));
+        len > 0) {
+      proc_path.SetFile(llvm::StringRef(storage, len), FileSpec::Style::native);
+    }
+
+    if (auxv_path && proc_path) {
+      g_fields->program_filespec =
+          llvm::sys::fs::equivalent(auxv_path.GetPath(), proc_path.GetPath())
+              ? auxv_path
+              : proc_path;
+    } else {
+      g_fields->program_filespec = auxv_path ? auxv_path : proc_path;
+    }
+  });
+  return g_fields->program_filespec;
 }
 
 void HostInfoLinux::ComputeHostArchitectureSupport(ArchSpec &arch_32,
