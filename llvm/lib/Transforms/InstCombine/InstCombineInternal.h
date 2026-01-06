@@ -479,7 +479,7 @@ private:
                                      const Twine &NameStr = "",
                                      InsertPosition InsertBefore = nullptr) {
     auto *Sel = SelectInst::Create(C, S1, S2, NameStr, InsertBefore, nullptr);
-    setExplicitlyUnknownBranchWeightsIfProfiled(*Sel, F, DEBUG_TYPE);
+    setExplicitlyUnknownBranchWeightsIfProfiled(*Sel, DEBUG_TYPE, &F);
     return Sel;
   }
 
@@ -667,6 +667,8 @@ public:
                                 bool FoldWithMultiUse = false,
                                 bool SimplifyBothArms = false);
 
+  Instruction *foldBinOpSelectBinOp(BinaryOperator &Op);
+
   /// This is a convenience wrapper function for the above two functions.
   Instruction *foldBinOpIntoSelectOrPhi(BinaryOperator &I);
 
@@ -700,7 +702,7 @@ public:
   /// folded operation.
   void PHIArgMergedDebugLoc(Instruction *Inst, PHINode &PN);
 
-  Value *foldPtrToIntOfGEP(Type *IntTy, Value *Ptr);
+  Value *foldPtrToIntOrAddrOfGEP(Type *IntTy, Value *Ptr);
   Instruction *foldGEPICmp(GEPOperator *GEPLHS, Value *RHS, CmpPredicate Cond,
                            Instruction &I);
   Instruction *foldSelectICmp(CmpPredicate Pred, SelectInst *SI, Value *RHS,
