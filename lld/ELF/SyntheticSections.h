@@ -147,7 +147,7 @@ private:
   // The total number of individual fre rows. Needed for the header.
   uint32_t numFREs = 0;
   uint64_t freSubSecLen = 0;
-}
+};
 
 class GotSection final : public SyntheticSection {
 public:
