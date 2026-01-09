@@ -704,6 +704,13 @@ void SFrameSection::addRecords(SFrameInputSection *sec, ArrayRef<RelTy> rels) {
       ++numFDEs;
       numFREs += fde.NumFREs;
       freSubSecLen += freSize;
+    } else {
+      // Make this relocation into a nop, to allow --gc-sections to work. One
+      // goal of the sframe implementation is to be self-contained. Doing this
+      // here rather than somewhere in Relocations.cpp avoids more invasive
+      // changes.
+      RelTy *r = const_cast<RelTy *>(&rel);
+      r->setSymbolAndType(0, 0, false);
     }
   }
 }
@@ -712,7 +719,7 @@ template <class ELFT>
 void SFrameSection::addSectionAux(SFrameInputSection *sec) {
   if (!sec->isLive())
     return;
-  const RelsOrRelas<ELFT> rels =
+  RelsOrRelas<ELFT> rels =
       sec->template relsOrRelas<ELFT>(/*supportsCrel=*/false);
   if (rels.areRelocsRel())
     addRecords<ELFT>(sec, rels.rels);
