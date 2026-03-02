@@ -1497,6 +1497,21 @@ SyntheticSection *SFrameInputSection::getParent() const {
   return cast_or_null<SyntheticSection>(parent);
 }
 
+template <typename RelTy>
+inline Relocs<RelTy>
+SFrameInputSection::sortRels(Relocs<RelTy> rels,
+                             SmallVector<RelTy, 0> &storage) {
+  auto cmp = [](const RelTy &a, const RelTy &b) {
+    return a.r_offset < b.r_offset;
+  };
+  if (!llvm::is_sorted(rels, cmp)) {
+    storage.assign(rels.begin(), rels.end());
+    llvm::stable_sort(storage, cmp);
+    rels = Relocs<RelTy>(storage);
+  }
+  return rels;
+}
+
 template <class ELFT> void SFrameInputSection::split() {
   const RelsOrRelas<ELFT> rels = relsOrRelas<ELFT>(/*supportsCrel=*/false);
   // getReloc expects the relocations to be sorted by r_offset. See the comment

@@ -471,6 +471,9 @@ public:
   SmallVector<uint32_t> fdeFRESizes;
 
   SyntheticSection *getParent() const;
+  template <typename RelTy>
+  inline Relocs<RelTy> sortRels(Relocs<RelTy> rels,
+                                SmallVector<RelTy, 0> &storage);
 };
 
 // This is a section that is added directly to an output section instead of
