@@ -29,7 +29,7 @@ add_entrypoint_object(
   SRCS
     connect.cpp
   HDRS
-    ../socket.h
+    ../connect.h
   DEPENDS
     libc.include.sys_socket
     libc.src.__support.OSUtil.osutil
