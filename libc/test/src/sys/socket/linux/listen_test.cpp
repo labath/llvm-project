@@ -15,6 +15,7 @@
 #include "src/stdio/remove.h"
 #include "src/unistd/close.h"
 
+#include "src/__support/CPP/scope.h"
 #include "test/UnitTest/ErrnoCheckingTest.h"
 #include "test/UnitTest/ErrnoSetterMatcher.h"
 #include "test/UnitTest/Test.h"
@@ -22,6 +23,7 @@
 using LIBC_NAMESPACE::testing::ErrnoSetterMatcher::Fails;
 using LIBC_NAMESPACE::testing::ErrnoSetterMatcher::Succeeds;
 using LlvmLibcListenTest = LIBC_NAMESPACE::testing::ErrnoCheckingTest;
+using LIBC_NAMESPACE::cpp::scope_exit;
 
 TEST_F(LlvmLibcListenTest, ListenLocalSocket) {
 
@@ -31,6 +33,8 @@ TEST_F(LlvmLibcListenTest, ListenLocalSocket) {
   int sock = LIBC_NAMESPACE::socket(AF_UNIX, SOCK_STREAM, 0);
   ASSERT_GE(sock, 0);
   ASSERT_ERRNO_SUCCESS();
+  scope_exit close_sock(
+      [&] { ASSERT_THAT(LIBC_NAMESPACE::close(sock), Succeeds(0)); });
 
   struct sockaddr_un my_addr;
 
@@ -47,11 +51,10 @@ TEST_F(LlvmLibcListenTest, ListenLocalSocket) {
       LIBC_NAMESPACE::bind(sock, reinterpret_cast<struct sockaddr *>(&my_addr),
                            sizeof(struct sockaddr_un)),
       Succeeds(0));
+  scope_exit remove_sock_path(
+      [&] { ASSERT_THAT(LIBC_NAMESPACE::remove(SOCK_PATH), Succeeds(0)); });
 
   ASSERT_THAT(LIBC_NAMESPACE::listen(sock, 5), Succeeds(0));
-
-  ASSERT_THAT(LIBC_NAMESPACE::close(sock), Succeeds(0));
-  ASSERT_THAT(LIBC_NAMESPACE::remove(SOCK_PATH), Succeeds(0));
 }
 
 TEST_F(LlvmLibcListenTest, ListenFails) {
