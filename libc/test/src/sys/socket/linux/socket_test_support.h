@@ -13,23 +13,24 @@
 #include "hdr/types/size_t.h"
 #include "hdr/types/socklen_t.h"
 #include "hdr/types/struct_sockaddr_un.h"
+#include "src/__support/CPP/string_view.h"
 #include "src/__support/common.h"
-#include "src/string/strlen.h"
-#include "src/string/strncmp.h"
 #include "src/string/strncpy.h"
+#include "src/string/strnlen.h"
 #include "test/UnitTest/LibcTest.h"
 
 namespace LIBC_NAMESPACE_DECL {
 namespace testing {
 
-LIBC_INLINE bool make_sockaddr_un(const char *path, struct sockaddr_un &sun) {
+[[nodiscard]] LIBC_INLINE bool make_sockaddr_un(cpp::string_view path,
+                                                struct sockaddr_un &sun) {
   sun.sun_family = AF_UNIX;
   // The kernel accepts addresses which fill the entire sun_path buffer (without
   // the terminating '\0' character), but we don't do that as it makes matching
   // the returned values more difficult.
-  if (strlen(path) + 1 > sizeof(sun.sun_path))
+  if (path.size() + 1 > sizeof(sun.sun_path))
     return false;
-  strncpy(sun.sun_path, path, sizeof(sun.sun_path));
+  strncpy(sun.sun_path, path.data(), sizeof(sun.sun_path));
   return true;
 }
 
@@ -39,12 +40,12 @@ struct SocketAddress {
 };
 
 class SocketAddressMatcher : public Matcher<SocketAddress> {
-  const char *expected_path;
+  cpp::string_view expected_path;
   struct sockaddr_un actual_addr;
   socklen_t actual_addrlen;
 
 public:
-  explicit SocketAddressMatcher(const char *path) : expected_path(path) {}
+  explicit SocketAddressMatcher(cpp::string_view path) : expected_path(path) {}
 
   bool match(const SocketAddress &actual) {
     actual_addr = actual.addr;
@@ -53,10 +54,13 @@ public:
       return false;
     if (actual_addrlen > sizeof(actual_addr))
       return false;
-    size_t expected_path_len = strlen(expected_path);
+    size_t expected_path_len = expected_path.size();
     if (expected_path_len + 1 + sizeof(actual_addr.sun_family) > actual_addrlen)
       return false;
-    return strncmp(actual_addr.sun_path, expected_path, expected_path_len) == 0;
+    cpp::string_view actual_path(
+        actual_addr.sun_path,
+        strnlen(actual_addr.sun_path, actual_addrlen - sizeof(sa_family_t)));
+    return actual_path == expected_path;
   }
 
   void explainError() override {
@@ -68,21 +72,24 @@ public:
       tlog << "Expected address length to be less than or equal to "
            << sizeof(actual_addr) << " but got " << actual_addrlen << "\n";
     }
-    size_t expected_path_len = strlen(expected_path);
+    size_t expected_path_len = expected_path.size();
     if (expected_path_len + 1 + sizeof(actual_addr.sun_family) >
         actual_addrlen) {
       tlog << "Expected address length to be less than or equal to "
            << expected_path_len + 1 + sizeof(actual_addr.sun_family)
            << " but got " << actual_addrlen << "\n";
     }
-    if (strncmp(actual_addr.sun_path, expected_path, expected_path_len) != 0) {
+    cpp::string_view actual_path(
+        actual_addr.sun_path,
+        strnlen(actual_addr.sun_path, actual_addrlen - sizeof(sa_family_t)));
+    if (actual_path != expected_path) {
       tlog << "Expected address path to be " << expected_path << " but got "
-           << actual_addr.sun_path << "\n";
+           << actual_path << "\n";
     }
   }
 };
 
-LIBC_INLINE SocketAddressMatcher MatchesAddress(const char *path) {
+LIBC_INLINE SocketAddressMatcher MatchesAddress(cpp::string_view path) {
   return SocketAddressMatcher(path);
 }
 

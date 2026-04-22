@@ -11,15 +11,13 @@
 #include "hdr/types/size_t.h"
 #include "hdr/types/struct_sockaddr_un.h"
 #include "src/fcntl/fcntl.h"
+#include "src/stdio/remove.h"
 #include "src/sys/socket/accept.h"
 #include "src/sys/socket/accept4.h"
 #include "src/sys/socket/bind.h"
 #include "src/sys/socket/connect.h"
 #include "src/sys/socket/listen.h"
 #include "src/sys/socket/socket.h"
-
-#include "src/stdio/remove.h"
-
 #include "src/unistd/close.h"
 
 #include "test/UnitTest/ErrnoCheckingTest.h"
@@ -33,12 +31,12 @@ using LlvmLibcConnectAcceptTest = LIBC_NAMESPACE::testing::ErrnoCheckingTest;
 
 TEST_F(LlvmLibcConnectAcceptTest, ConnectLocalSocket) {
   const char *CONNECT_FILE = "connect_file.test";
-  auto CONNECT_PATH = libc_make_test_file_path(CONNECT_FILE);
+  const auto CONNECT_PATH = libc_make_test_file_path(CONNECT_FILE);
   struct sockaddr_un connect_addr;
   ASSERT_TRUE(make_sockaddr_un(CONNECT_PATH, connect_addr));
 
   const char *ACCEPT_FILE = "accept_file.test";
-  auto ACCEPT_PATH = libc_make_test_file_path(ACCEPT_FILE);
+  const auto ACCEPT_PATH = libc_make_test_file_path(ACCEPT_FILE);
   struct sockaddr_un accept_addr;
   ASSERT_TRUE(make_sockaddr_un(ACCEPT_PATH, accept_addr));
 

@@ -3,13 +3,13 @@ add_header_library(
   HDRS
     socket_test_support.h
   DEPENDS
+    libc.__support.CPP.string_view
     libc.hdr.sys_socket_macros
     libc.hdr.types.size_t
     libc.hdr.types.socklen_t
     libc.hdr.types.struct_sockaddr_un
-    libc.src.string.strlen
-    libc.src.string.strncmp
     libc.src.string.strncpy
+    libc.src.string.strnlen
 )
 
 add_custom_target(libc_sys_socket_unittests)
