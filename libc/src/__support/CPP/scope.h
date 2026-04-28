@@ -1,4 +1,4 @@
-//===-- Standalone implementation of experimental/scope_exit ----*- C++ -*-===//
+//===-- Standalone implementation of experimental/scope ---------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -17,6 +17,8 @@
 namespace LIBC_NAMESPACE_DECL {
 namespace cpp {
 
+// A reimplementation of std::experimental::scope_exit from the C++ library
+// fundamentals TS v3
 template <typename EF> class scope_exit {
   EF exit_function;
   bool execute_on_destruction;
