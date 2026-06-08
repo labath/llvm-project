@@ -224,6 +224,9 @@ if(LLVM_LIBC_FULL_BUILD)
     libc.src.setjmp.setjmp
     libc.src.setjmp.siglongjmp
     libc.src.setjmp.sigsetjmp
+
+    # sys/ptrace.h entrypoints
+    libc.src.sys.ptrace.ptrace
   )
 endif()
 
@@ -565,9 +568,6 @@ if(LLVM_LIBC_ENABLE_EXPERIMENTAL_ENTRYPOINTS)
       libc.src.regex.regexec
       libc.src.regex.regerror
       libc.src.regex.regfree
-
-      # sys/ptrace.h entrypoints
-      libc.src.sys.ptrace.ptrace
     )
   endif()
 endif()
