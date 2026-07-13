@@ -2,7 +2,7 @@ add_custom_target(libc_unistd_unittests)
 
 add_subdirectory(testdata)
 
-add_libc_unittest(
+add_libc_test(
   alarm_test
   SUITE
     libc_unistd_unittests
@@ -17,7 +17,7 @@ add_libc_unittest(
     libc.src.unistd.alarm
 )
 
-add_libc_unittest(
+add_libc_test(
   access_test
   SUITE
     libc_unistd_unittests
@@ -34,7 +34,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   chdir_test
   SUITE
     libc_unistd_unittests
@@ -51,7 +51,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   chown_test
   SUITE
     libc_unistd_unittests
@@ -71,7 +71,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   dup_test
   SUITE
     libc_unistd_unittests
@@ -90,7 +90,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   dup2_test
   SUITE
     libc_unistd_unittests
@@ -109,7 +109,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   dup3_test
   SUITE
     libc_unistd_unittests
@@ -128,7 +128,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   faccessat_test
   SUITE
     libc_unistd_unittests
@@ -145,7 +145,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   fchdir_test
   SUITE
     libc_unistd_unittests
@@ -161,7 +161,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   fchown_test
   SUITE
     libc_unistd_unittests
@@ -181,7 +181,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   ftruncate_test
   SUITE
     libc_unistd_unittests
@@ -201,7 +201,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   pread_pwrite_test
   SUITE
     libc_unistd_unittests
@@ -221,7 +221,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   read_write_test
   SUITE
     libc_unistd_unittests
@@ -240,7 +240,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   link_test
   SUITE
     libc_unistd_unittests
@@ -257,7 +257,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   linkat_test
   SUITE
     libc_unistd_unittests
@@ -274,7 +274,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   lseek_test
   SUITE
     libc_unistd_unittests
@@ -291,7 +291,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   pipe_test
   SUITE
     libc_unistd_unittests
@@ -306,7 +306,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   pipe2_test
   SUITE
     libc_unistd_unittests
@@ -321,7 +321,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   rmdir_test
   SUITE
     libc_unistd_unittests
@@ -337,7 +337,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   swab_test
   SUITE
     libc_unistd_unittests
@@ -347,7 +347,7 @@ add_libc_unittest(
     libc.src.unistd.swab
 )
 
-add_libc_unittest(
+add_libc_test(
   readlink_test
   SUITE
     libc_unistd_unittests
@@ -365,7 +365,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   readlinkat_test
   SUITE
     libc_unistd_unittests
@@ -384,7 +384,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   setsid_test
   SUITE
     libc_unistd_unittests
@@ -394,7 +394,7 @@ add_libc_unittest(
     libc.src.unistd.setsid
 )
 
-add_libc_unittest(
+add_libc_test(
   symlink_test
   SUITE
     libc_unistd_unittests
@@ -411,7 +411,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   symlinkat_test
   SUITE
     libc_unistd_unittests
@@ -428,7 +428,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   truncate_test
   SUITE
     libc_unistd_unittests
@@ -448,7 +448,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   unlink_test
   SUITE
     libc_unistd_unittests
@@ -464,7 +464,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   unlinkat_test
   SUITE
     libc_unistd_unittests
@@ -481,7 +481,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   gethostname_test
   SUITE
     libc_unistd_unittests
@@ -493,7 +493,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoCheckingTest
 )
 
-add_libc_unittest(
+add_libc_test(
   getpagesize_test
   SUITE
     libc_unistd_unittests
@@ -504,7 +504,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoCheckingTest
 )
 
-add_libc_unittest(
+add_libc_test(
   getgid_test
   SUITE
     libc_unistd_unittests
@@ -514,7 +514,7 @@ add_libc_unittest(
     libc.src.unistd.getgid
 )
 
-add_libc_unittest(
+add_libc_test(
   getpid_test
   SUITE
     libc_unistd_unittests
@@ -524,7 +524,7 @@ add_libc_unittest(
     libc.src.unistd.getpid
 )
 
-add_libc_unittest(
+add_libc_test(
   getppid_test
   SUITE
     libc_unistd_unittests
@@ -534,7 +534,7 @@ add_libc_unittest(
     libc.src.unistd.getppid
 )
 
-add_libc_unittest(
+add_libc_test(
   getsid_test
   SUITE
     libc_unistd_unittests
@@ -546,7 +546,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   getuid_test
   SUITE
     libc_unistd_unittests
@@ -556,7 +556,7 @@ add_libc_unittest(
     libc.src.unistd.getuid
 )
 
-add_libc_unittest(
+add_libc_test(
   isatty_test
   SUITE
     libc_unistd_unittests
@@ -571,7 +571,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   geteuid_test
   SUITE
     libc_unistd_unittests
@@ -581,7 +581,7 @@ add_libc_unittest(
     libc.src.unistd.geteuid
 )
 
-add_libc_unittest(
+add_libc_test(
   syscall_test
   SUITE
     libc_unistd_unittests
@@ -598,7 +598,7 @@ add_libc_unittest(
 )
 
 
-add_libc_unittest(
+add_libc_test(
   sysconf_test
   SUITE
     libc_unistd_unittests
@@ -609,7 +609,7 @@ add_libc_unittest(
     libc.src.unistd.sysconf
 )
 
-add_libc_unittest(
+add_libc_test(
   fpathconf_test
   SUITE
     libc_unistd_unittests
@@ -626,7 +626,7 @@ add_libc_unittest(
     libc.test.UnitTest.ErrnoSetterMatcher
 )
 
-add_libc_unittest(
+add_libc_test(
   pathconf_test
   SUITE
     libc_unistd_unittests

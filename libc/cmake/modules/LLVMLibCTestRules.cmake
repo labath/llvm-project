@@ -750,9 +750,6 @@ function(add_libc_hermetic test_name)
     ${ARGN}
   )
 
-  if(NOT HERMETIC_TEST_SUITE)
-    message(FATAL_ERROR "SUITE not specified for ${fq_target_name}")
-  endif()
   if(NOT HERMETIC_TEST_SRCS)
     message(FATAL_ERROR "The SRCS list for add_integration_test is missing.")
   endif()
@@ -774,6 +771,17 @@ function(add_libc_hermetic test_name)
       libc.src.string.memset
       libc.src.strings.bcmp
       libc.src.strings.bzero
+      libc.src.poll.poll
+      libc.src.signal.kill
+      libc.src.stdio.fflush
+      libc.src.stdio.stderr
+      libc.src.stdio.stdout
+      libc.src.stdlib.exit
+      libc.src.string.strsignal
+      libc.src.sys.wait.waitpid
+      libc.src.unistd.close
+      libc.src.unistd.fork
+      libc.src.unistd.pipe
   )
 
   if(libc.src.compiler.__stack_chk_fail IN_LIST TARGET_LLVMLIBC_ENTRYPOINTS)
@@ -966,7 +974,9 @@ function(add_libc_hermetic test_name)
     )
   endif()
 
-  add_dependencies(${HERMETIC_TEST_SUITE} ${fq_target_name})
+  if (HERMETIC_TEST_SUITE)
+    add_dependencies(${HERMETIC_TEST_SUITE} ${fq_target_name})
+  endif()
   if(NOT ${HERMETIC_TEST_IS_GPU_BENCHMARK})
     # If it is a benchmark, it will already have been added to the
     # gpu-benchmark target
@@ -995,14 +1005,12 @@ function(add_libc_test test_name)
     "" # Multi-value arguments
     ${ARGN}
   )
-  if(LIBC_ENABLE_UNITTESTS AND NOT LIBC_TEST_HERMETIC_TEST_ONLY)
-    add_libc_unittest(${test_name}.__unit__ ${LIBC_TEST_UNPARSED_ARGUMENTS})
-  endif()
   if(LIBC_ENABLE_HERMETIC_TESTS AND NOT LIBC_TEST_UNIT_TEST_ONLY)
     add_libc_hermetic(
       ${test_name}.__hermetic__
       LINK_LIBRARIES
         LibcTest.hermetic
+        LibcDeathTestExecutors.hermetic
       ${LIBC_TEST_UNPARSED_ARGUMENTS}
     )
     get_fq_target_name(${test_name} fq_test_name)

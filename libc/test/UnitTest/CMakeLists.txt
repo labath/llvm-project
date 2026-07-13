@@ -25,15 +25,7 @@ function(add_unittest_framework_library name)
     endif()
   endforeach()
 
-  if(LLVM_LIBC_FULL_BUILD)
-    # TODO: Build test framework with LIBC_FULL_BUILD in full build mode after
-    # making LibcFPExceptionHelpers and LibcDeathTestExecutors hermetic.
-    set(LLVM_LIBC_FULL_BUILD "")
-    _get_common_test_compile_options(compile_options "" "")
-    set(LLVM_LIBC_FULL_BUILD ON)
-  else()
-    _get_common_test_compile_options(compile_options "" "")
-  endif()
+  _get_common_test_compile_options(compile_options "" "")
 
   if (TEST_LIB_COMPILE_OPTIONS)
     list(APPEND compile_options ${TEST_LIB_COMPILE_OPTIONS})
