@@ -15,8 +15,10 @@
 #ifndef LLVM_LIBC_SRC___SUPPORT_FIXEDVECTOR_H
 #define LLVM_LIBC_SRC___SUPPORT_FIXEDVECTOR_H
 
+#include "hdr/func/malloc.h"
 #include "src/__support/CPP/array.h"
 #include "src/__support/CPP/iterator.h"
+#include "src/__support/CPP/optional.h"
 #include "src/__support/CPP/type_traits/is_trivially_copyable.h"
 #include "src/__support/libc_assert.h"
 #include "src/__support/macros/config.h"
@@ -90,14 +92,48 @@ public:
     return store[idx];
   }
 
+  template <typename RandomAccessIterator>
+  LIBC_INLINE constexpr cpp::optional<iterator>
+  insert(const_iterator pos, RandomAccessIterator first,
+         RandomAccessIterator last) {
+    LIBC_ASSERT(pos >= begin());
+    LIBC_ASSERT(pos <= end());
+    LIBC_ASSERT(last >= first);
+    size_t count = static_cast<size_t>(last - first);
+    if (count > CAPACITY - item_count)
+      return cpp::nullopt;
+    size_t index = static_cast<size_t>(pos - begin());
+    if (count == 0)
+      return begin() + index;
+    for (size_t i = item_count; i > index; --i)
+      store[i + count - 1] = store[i - 1];
+    for (size_t i = 0; i < count; ++i, ++first)
+      store[index + i] = *first;
+    item_count += count;
+    return begin() + index;
+  }
+
   LIBC_INLINE constexpr bool empty() const { return item_count == 0; }
 
   LIBC_INLINE constexpr size_t size() const { return item_count; }
+
+  LIBC_INLINE constexpr const T *data() const { return store.data(); }
 
   // Empties the store for all practical purposes.
   LIBC_INLINE constexpr void reset() {
     inline_memset(store.data(), 0, sizeof(T) * item_count);
     item_count = 0;
+  }
+
+  LIBC_INLINE constexpr bool resize(size_t count) {
+    if (count > CAPACITY)
+      return false;
+    if (count < item_count)
+      inline_memset(&store[count], 0, sizeof(T) * (item_count - count));
+    else if (count > item_count)
+      inline_memset(&store[item_count], 0, sizeof(T) * (count - item_count));
+    item_count = count;
+    return true;
   }
 
   // This static method does not free up the resources held by |store|,

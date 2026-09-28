@@ -11,6 +11,9 @@
 ///
 //===----------------------------------------------------------------------===//
 
+// Makes it possible to include inline_memmove and inline_memset in the same file.
+#pragma clang diagnostic ignored "-Wshadow"
+
 #include "src/stdlib/realpath.h"
 #include "hdr/errno_macros.h"
 #include "hdr/fcntl_macros.h"
@@ -19,7 +22,6 @@
 #include "hdr/types/mode_t.h"
 #include "hdr/types/size_t.h"
 #include "src/__support/CPP/optional.h"
-#include "src/__support/CPP/string.h"
 #include "src/__support/CPP/string_view.h"
 #include "src/__support/OSUtil/linux/stat/kernel_statx_types.h"
 #include "src/__support/OSUtil/linux/syscall_wrappers/getcwd.h"
@@ -28,9 +30,11 @@
 #include "src/__support/OSUtil/path.h"
 #include "src/__support/common.h"
 #include "src/__support/error_or.h"
+#include "src/__support/fixedvector.h"
 #include "src/__support/libc_errno.h"
 #include "src/__support/macros/config.h"
 #include "src/string/memory_utils/inline_memcpy.h"
+#include "src/string/memory_utils/inline_memmove.h"
 
 namespace LIBC_NAMESPACE_DECL {
 namespace {
@@ -57,7 +61,10 @@ class ResolvedPath {
 public:
   ResolvedPath() { set_to_root(); }
 
-  void set_to_root() { path = path::SEPARATOR; }
+  void set_to_root() {
+    path.reset();
+    (void)path.push_back(path::SEPARATOR);
+  }
 
   cpp::optional<Error> set_to_cwd() {
     char buf[PATH_MAX];
@@ -71,13 +78,16 @@ public:
     if (*ret <= 0)
       return Error(EIO);
 
-    path = cpp::string_view(buf, *ret - 1);
+    path.reset();
+    LIBC_ASSERT(*ret <= PATH_MAX);
+    path.insert(path.end(), buf, buf+*ret -1);
     return cpp::nullopt;
   }
 
   // Removes the trailing path component.
   void set_to_parent() {
-    size_t sep_index = cpp::string_view(path).find_last_of(path::SEPARATOR);
+    size_t sep_index = cpp::string_view(path.begin(), path.size())
+                           .find_last_of(path::SEPARATOR);
 
     // Never move past the root separator. For example,
     // ensures that set_to_parent on "/hello" only resizes to "/".
@@ -86,7 +96,7 @@ public:
 
   // Adds a single component to the end of this path.
   cpp::optional<Error> push_component(cpp::string_view component) {
-    if (!path::is_root(path)) {
+    if (!path::is_root(cpp::string_view(path.begin(), path.size()))) {
       if (cpp::optional<Error> err = push_raw(path::SEPARATOR); err)
         return err;
     }
@@ -97,21 +107,33 @@ public:
   // Releases ownership of the underlying C-string and resets this path.
   //
   // Must be free'd by the caller.
-  char *release() { return path.release_c_str(); }
+  char *release() {
+    char *result = static_cast<char *>(malloc(path.size() + 1));
+    inline_memcpy(result, path.begin(), path.size());
+    result[path.size() + 1] = '\0';
+    return result;
+  }
 
-  const char *c_str() const { return path.c_str(); }
+  const char *c_str() { 
+    path.push_back('\0');
+    (void)path.pop_back();
+    return path.data();
+  }
 
   // Copies the content of this path to `dst`.
-  void copy_to(char *dst) { inline_memcpy(dst, path.c_str(), path.size() + 1); }
+  void copy_to(char *dst) {
+    inline_memcpy(dst, path.data(), path.size());
+    dst[path.size()] = '\0';
+  }
 
 private:
   cpp::optional<Error> push_raw(cpp::string_view value) {
-    // -1 because PATH_MAX includes a null-terminator.
+  // -1 because PATH_MAX includes a null-terminator.
     size_t remaining_bytes = (PATH_MAX - 1) - path.size();
     if (value.size() > remaining_bytes)
       return Error(ENAMETOOLONG);
 
-    path += value;
+    (void)path.insert(path.end(), value.begin(), value.end());
     return cpp::nullopt;
   }
 
@@ -119,7 +141,7 @@ private:
     return push_raw(cpp::string_view(&c, 1));
   }
 
-  cpp::string path;
+  FixedVector<char, PATH_MAX> path;
 };
 
 // A view over path components yet to be processed by realpath.
@@ -149,7 +171,7 @@ public:
   // Takes the next path component,
   // starting with the component closest to the root.
   cpp::string_view advance_component() {
-    cpp::string_view view = path;
+    cpp::string_view view(path.begin(), path.size());
 
     const size_t component_start =
         view.find_first_not_of(path::SEPARATOR, /* From= */ consumed_size);
@@ -177,10 +199,15 @@ public:
       // If the string to prepend fits in the unused prefix of path,
       // just slot it in directly and decrease consumed_size.
       size_t start = consumed_size - other_path.size();
-      path.replace(start, other_path.size(), other_path);
+      inline_memcpy(&path[start], other_path.data(), other_path.size());
       consumed_size = start;
     } else {
-      path.replace(0, consumed_size, other_path);
+      size_t old_size = path.size();
+      (void)path.resize(new_size);
+      if (old_size > consumed_size)
+        inline_memmove(&path[other_path.size()], &path[consumed_size],
+                       old_size - consumed_size);
+      inline_memcpy(path.begin(), other_path.data(), other_path.size());
       consumed_size = 0;
     }
     return cpp::nullopt;
@@ -188,7 +215,7 @@ public:
 
 private:
   // The pending path. The unprocessed section is [consumed_size, path.size()).
-  cpp::string path;
+  FixedVector<char, PATH_MAX> path;
 
   // The prefix of path that has already been advanced through.
   size_t consumed_size = 0;

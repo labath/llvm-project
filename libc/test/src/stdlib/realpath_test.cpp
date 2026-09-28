@@ -15,12 +15,12 @@
 #include "hdr/func/free.h"
 #include "hdr/limits_macros.h"
 #include "hdr/types/size_t.h"
-#include "src/__support/CPP/string.h"
 #include "src/__support/CPP/string_view.h"
 #include "src/__support/CPP/utility.h"
 #include "src/__support/OSUtil/path.h"
 #include "src/__support/c_string.h"
 #include "src/__support/fixedvector.h"
+#include "src/__support/integer_to_string.h"
 #include "src/__support/libc_assert.h"
 #include "src/__support/libc_errno.h"
 #include "src/__support/macros/config.h"
@@ -42,6 +42,27 @@ namespace cpp = LIBC_NAMESPACE::cpp;
 namespace path = LIBC_NAMESPACE::path;
 using LIBC_NAMESPACE::CString;
 using LIBC_NAMESPACE::FixedVector;
+using LIBC_NAMESPACE::IntegerToString;
+
+using PathVector = FixedVector<char, PATH_MAX + 1>;
+
+template <size_t CAPACITY>
+const char *c_str(FixedVector<char, CAPACITY> &vec) {
+  if (!vec.push_back('\0'))
+    return nullptr;
+  (void)vec.pop_back();
+  return vec.data();
+}
+
+template <size_t CAPACITY>
+const char *c_str(FixedVector<char, CAPACITY> &&vec) {
+  return c_str(vec);
+}
+
+template <size_t CAPACITY>
+cpp::string_view view(const FixedVector<char, CAPACITY> &vec) {
+  return cpp::string_view(vec.data(), vec.size());
+}
 using LIBC_NAMESPACE::testing::ErrnoCheckingTest;
 using LIBC_NAMESPACE::testing::tlog;
 using LIBC_NAMESPACE::testing::ErrnoSetterMatcher::Succeeds;
@@ -72,7 +93,7 @@ constexpr size_t PATH_SEP_SIZE = 1;
 // A test directory that removes itself on destruction.
 class TestDir {
   // The test directory's absolute path.
-  cpp::string path;
+  PathVector path;
 
   // File descriptor of the test directory.
   int fd = -1;
@@ -86,13 +107,18 @@ class TestDir {
   FixedVector<char *, 64> dirs;
 
 public:
-  TestDir() = default;
+  TestDir() {
+    if (path.push_back('\0'))
+      (void)path.pop_back();
+  }
 
   // Initializes this TestDir container with the given path.
-  void initialize(cpp::string directory_path, int dirfd) {
+  void initialize(PathVector directory_path, int dirfd) {
     LIBC_ASSERT(this->fd == -1);
     this->path = directory_path;
     this->fd = dirfd;
+    if (this->path.push_back('\0'))
+      (void)this->path.pop_back();
   }
 
   ~TestDir() {
@@ -111,7 +137,7 @@ public:
     }
 
     LIBC_NAMESPACE::close(fd);
-    LIBC_NAMESPACE::unlinkat(AT_FDCWD, path.c_str(), AT_REMOVEDIR);
+    LIBC_NAMESPACE::unlinkat(AT_FDCWD, c_str(), AT_REMOVEDIR);
   }
 
   TestDir(TestDir &other) = delete;
@@ -120,18 +146,21 @@ public:
   TestDir &operator=(TestDir &&other) = delete;
 
   // Returns the absolute path of `relative_path` in this test directory.
-  cpp::string absolute_path(cpp::string_view relative_path) const {
-    cpp::string res = path;
-    res += "/";
-    res += relative_path;
+  PathVector absolute_path(cpp::string_view relative_path) const {
+    PathVector res = path;
+    const char sep = '/';
+    (void)res.insert(res.end(), &sep, &sep + 1);
+    (void)res.insert(res.end(), relative_path.begin(), relative_path.end());
+    if (res.push_back('\0'))
+      (void)res.pop_back();
     return res;
   }
 
   // Returns this test directory path as a C string.
-  const char *c_str() const { return path.c_str(); }
+  const char *c_str() const { return path.data(); }
 
   // Returns this test directory path as a string view.
-  const cpp::string_view view() const { return path; }
+  const cpp::string_view view() const { return ::view(path); }
 
   // Creates a directory relative to TestDir. Returns zero on success.
   [[nodiscard]] int mkdir(const char *relative_path, mode_t mode = 0755) {
@@ -180,16 +209,19 @@ public:
   }
 };
 
-cpp::string unique_id() {
-  cpp::string id;
-  id += cpp::to_string(LIBC_NAMESPACE::getpid());
-  id += ".";
+FixedVector<char, 64> unique_id() {
+  FixedVector<char, 64> id;
+  IntegerToString<pid_t> pid_str(LIBC_NAMESPACE::getpid());
+  cpp::string_view pid_view = pid_str.view();
+  (void)id.insert(id.end(), pid_view.begin(), pid_view.end());
+  const char dot = '.';
+  (void)id.insert(id.end(), &dot, &dot + 1);
 
   constexpr cpp::string_view alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
   uint8_t rand_bytes[16] = {};
   (void)LIBC_NAMESPACE::getrandom(rand_bytes, sizeof(rand_bytes), 0);
   for (size_t i = 0; i < sizeof(rand_bytes); i++)
-    id += alphabet[rand_bytes[i] % alphabet.size()];
+    (void)id.push_back(alphabet[rand_bytes[i] % alphabet.size()]);
 
   return id;
 }
@@ -213,8 +245,14 @@ public:
     return LIBC_NAMESPACE::realpath(path, realpath_buf);
   }
 
-  char *realpath_buffered(const cpp::string &path) {
-    return realpath_buffered(path.c_str());
+  template <size_t CAPACITY>
+  char *realpath_buffered(FixedVector<char, CAPACITY> &path) {
+    return realpath_buffered(c_str(path));
+  }
+
+  template <size_t CAPACITY>
+  char *realpath_buffered(FixedVector<char, CAPACITY> &&path) {
+    return realpath_buffered(c_str(path));
   }
 
   // Creates a test directory in dst. Returns true if successful.
@@ -231,17 +269,38 @@ public:
     if (libc_errno != 0)
       return false;
 
-    cpp::string test_dir_path(test_dir_abspath);
-    test_dir_path += "/LlvmLibcRealpathTest.";
-    test_dir_path += name;
-    test_dir_path += ".";
+    PathVector test_dir_path;
+    cpp::string_view abspath_view(test_dir_abspath);
+    if (!test_dir_path.insert(test_dir_path.end(), abspath_view.begin(),
+                              abspath_view.end()))
+      return false;
+
+    constexpr cpp::string_view prefix = "/LlvmLibcRealpathTest.";
+    if (!test_dir_path.insert(test_dir_path.end(), prefix.begin(),
+                              prefix.end()))
+      return false;
+
+    cpp::string_view name_view(name);
+    if (!test_dir_path.insert(test_dir_path.end(), name_view.begin(),
+                              name_view.end()))
+      return false;
+
+    const char dot = '.';
+    if (!test_dir_path.insert(test_dir_path.end(), &dot, &dot + 1))
+      return false;
 
     // Include a unique ID in case multiple builds of this test run at once.
-    test_dir_path += unique_id();
-
-    if (ensure_directory_exists(AT_FDCWD, test_dir_path.c_str()))
+    auto uid = unique_id();
+    if (!test_dir_path.insert(test_dir_path.end(), uid.begin(), uid.end()))
       return false;
-    int fd = LIBC_NAMESPACE::openat(AT_FDCWD, test_dir_path.c_str(),
+
+    const char *test_dir_path_cstr = c_str(test_dir_path);
+    if (test_dir_path_cstr == nullptr)
+      return false;
+
+    if (ensure_directory_exists(AT_FDCWD, test_dir_path_cstr))
+      return false;
+    int fd = LIBC_NAMESPACE::openat(AT_FDCWD, test_dir_path_cstr,
                                     O_RDONLY | O_DIRECTORY);
     if (fd < 0)
       return false;
@@ -270,7 +329,7 @@ TEST_F(LlvmLibcRealpathTest, ErrorsWithNoEntryIfEmptyPath) {
 
 TEST_F(LlvmLibcRealpathTest, OkIfPathArgIsExactlyMaxSize) {
   // PATH_MAX counts null terminator, so construct a path of size PATH_MAX-1.
-  cpp::string s(PATH_MAX - 1, '/');
+  PathVector s(PATH_MAX - 1, '/');
   for (size_t i = 1; i < s.size(); i += 2)
     s[i] = '.';
 
@@ -281,7 +340,7 @@ TEST_F(LlvmLibcRealpathTest, OkIfPathArgIsExactlyMaxSize) {
 // `desired_size` characters.
 [[nodiscard]] bool create_absolute_path_with_size(TestDir &test_dir,
                                                   size_t desired_size,
-                                                  cpp::string &out) {
+                                                  PathVector &out) {
   if (desired_size < test_dir.view().size() + PATH_SEP_SIZE) {
     tlog << "Test directory is already too long in "
             "create_absolute_path_with_size: "
@@ -290,12 +349,12 @@ TEST_F(LlvmLibcRealpathTest, OkIfPathArgIsExactlyMaxSize) {
   }
   size_t remaining_size = desired_size - test_dir.view().size() - PATH_SEP_SIZE;
 
-  cpp::string relative_path;
-  relative_path.reserve(remaining_size);
+  PathVector relative_path;
 
   while (remaining_size != 0) {
     if (!relative_path.empty()) {
-      relative_path += '/';
+      if (!relative_path.push_back('/'))
+        return false;
       remaining_size -= PATH_SEP_SIZE;
     }
 
@@ -308,15 +367,18 @@ TEST_F(LlvmLibcRealpathTest, OkIfPathArgIsExactlyMaxSize) {
     if (remaining_size - component_size == PATH_SEP_SIZE)
       component_size -= 1;
 
-    for (size_t i = 0; i < component_size; ++i)
-      relative_path += 'a';
+    for (size_t i = 0; i < component_size; ++i) {
+      if (!relative_path.push_back('a'))
+        return false;
+    }
     remaining_size -= component_size;
 
-    if (test_dir.mkdir(relative_path.c_str()))
+    const char *rel_cstr = c_str(relative_path);
+    if (rel_cstr == nullptr || test_dir.mkdir(rel_cstr))
       return false;
   }
 
-  out = test_dir.absolute_path(relative_path);
+  out = test_dir.absolute_path(view(relative_path));
 
   if (out.size() != desired_size) {
     tlog << "Failed to create path of size=" << desired_size << "\n";
@@ -329,15 +391,15 @@ TEST_F(LlvmLibcRealpathTest, OkIfResolvedPathIsExactlyMaxSize) {
   TestDir test_dir;
   ASSERT_TRUE(create_test_dir("OkIfResolvedPathIsExactlyMaxSize", test_dir));
 
-  cpp::string path;
+  PathVector path;
   ASSERT_TRUE(create_absolute_path_with_size(test_dir, PATH_MAX - 1, path));
 
-  ASSERT_STREQ(realpath_buffered(path), path.c_str());
+  ASSERT_STREQ(realpath_buffered(path), c_str(path));
 }
 
 TEST_F(LlvmLibcRealpathTest, ErrorsWithNameTooLongIfPathArgExceedsMaxSize) {
   // PATH_MAX counts null terminator, so construct a path of size PATH_MAX.
-  cpp::string s(PATH_MAX, '/');
+  PathVector s(PATH_MAX, '/');
   for (size_t i = 1; i < s.size(); i += 2)
     s[i] = '.';
 
@@ -361,7 +423,7 @@ TEST_F(LlvmLibcRealpathTest, SimpleAbsolutePath) {
   ASSERT_THAT(test_dir.mkdir("a/b"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("a/b")),
-               test_dir.absolute_path("a/b").c_str());
+               c_str(test_dir.absolute_path("a/b")));
 }
 
 TEST_F(LlvmLibcRealpathTest, DotDotTraversesParent) {
@@ -372,7 +434,7 @@ TEST_F(LlvmLibcRealpathTest, DotDotTraversesParent) {
   ASSERT_THAT(test_dir.mkdir("a/b"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("a/b/..")),
-               test_dir.absolute_path("a").c_str());
+               c_str(test_dir.absolute_path("a")));
 }
 
 TEST_F(LlvmLibcRealpathTest, DotTraversalIsNop) {
@@ -383,7 +445,7 @@ TEST_F(LlvmLibcRealpathTest, DotTraversalIsNop) {
   ASSERT_THAT(test_dir.mkdir("a/b"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("a/b/./")),
-               test_dir.absolute_path("a/b").c_str());
+               c_str(test_dir.absolute_path("a/b")));
 }
 
 TEST_F(LlvmLibcRealpathTest, ConsecutiveSeparatorsIgnored) {
@@ -393,7 +455,7 @@ TEST_F(LlvmLibcRealpathTest, ConsecutiveSeparatorsIgnored) {
   ASSERT_THAT(test_dir.mkdir("a"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("a//..///a//")),
-               test_dir.absolute_path("a").c_str());
+               c_str(test_dir.absolute_path("a")));
 }
 
 TEST_F(LlvmLibcRealpathTest, AllocatesResultWhenBufferIsNull) {
@@ -423,7 +485,7 @@ TEST_F(LlvmLibcRealpathTest, FileAtEndOfPathIsOk) {
   ASSERT_THAT(test_dir.touch("a/file"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("a/file")),
-               test_dir.absolute_path("a/file").c_str());
+               c_str(test_dir.absolute_path("a/file")));
 }
 
 TEST_F(LlvmLibcRealpathTest, ErrorsWithNoEntWhenComponentDoesNotExist) {
@@ -460,20 +522,20 @@ TEST_F(LlvmLibcRealpathTest, RelativePathResolvesToCurrentWorkingDir) {
   ASSERT_STREQ(realpath_buffered("."), test_dir.c_str());
 
   ASSERT_THAT(test_dir.mkdir("a"), Succeeds());
-  ASSERT_STREQ(realpath_buffered("a"), test_dir.absolute_path("a").c_str());
+  ASSERT_STREQ(realpath_buffered("a"), c_str(test_dir.absolute_path("a")));
 }
 
 // Creates a directory with the desired_size and then chdir's into it.
 // Returns true on success.
 [[nodiscard]] bool chdir_to_absolute_path_with_size(TestDir &test_dir,
                                                     size_t desired_size,
-                                                    cpp::string &out) {
+                                                    PathVector &out) {
   if (!create_absolute_path_with_size(test_dir, desired_size, out))
     return false;
 
   // Convert the directory to be relative to test_dir.
   const char *test_dir_relative_path =
-      out.c_str() + test_dir.view().size() + PATH_SEP_SIZE;
+      c_str(out) + test_dir.view().size() + PATH_SEP_SIZE;
 
   // Change directories into the path iteratively.
   // This allows us to chdir into paths longer than PATH_MAX, as long as each
@@ -490,10 +552,10 @@ TEST_F(LlvmLibcRealpathTest, RelativeRealpathAcceptsPathExactlyMaxSize) {
   ASSERT_TRUE(
       create_test_dir("RelativeRealpathAcceptsPathExactlyMaxSize", test_dir));
 
-  cpp::string path;
+  PathVector path;
   ASSERT_TRUE(chdir_to_absolute_path_with_size(test_dir, PATH_MAX - 1, path));
 
-  ASSERT_STREQ(realpath_buffered("."), path.c_str());
+  ASSERT_STREQ(realpath_buffered("."), c_str(path));
 }
 
 TEST_F(LlvmLibcRealpathTest, RelativeRealpathRejectsPathExceedingMaxSize) {
@@ -501,7 +563,7 @@ TEST_F(LlvmLibcRealpathTest, RelativeRealpathRejectsPathExceedingMaxSize) {
   ASSERT_TRUE(
       create_test_dir("RelativeRealpathRejectsPathExceedingMaxSize", test_dir));
 
-  cpp::string path;
+  PathVector path;
   if (!chdir_to_absolute_path_with_size(test_dir, PATH_MAX, path)) {
     // Skip the test if the system didn't allow creating the path.
     ASSERT_ERRNO_EQ(ENAMETOOLONG);
@@ -519,11 +581,11 @@ TEST_F(LlvmLibcRealpathTest, AbsoluteSymlinkResolves) {
   ASSERT_THAT(test_dir.mkdir("a"), Succeeds());
   ASSERT_THAT(test_dir.touch("a/file"), Succeeds());
 
-  cpp::string absolute_target = test_dir.absolute_path("a/file");
-  ASSERT_THAT(test_dir.symlink(absolute_target.c_str(), "link"), Succeeds());
+  PathVector absolute_target = test_dir.absolute_path("a/file");
+  ASSERT_THAT(test_dir.symlink(c_str(absolute_target), "link"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("link")),
-               absolute_target.c_str());
+               c_str(absolute_target));
 }
 
 TEST_F(LlvmLibcRealpathTest, RelativeSymlinkResolves) {
@@ -536,7 +598,7 @@ TEST_F(LlvmLibcRealpathTest, RelativeSymlinkResolves) {
   ASSERT_THAT(test_dir.symlink("a/file", "link"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("link")),
-               test_dir.absolute_path("a/file").c_str());
+               c_str(test_dir.absolute_path("a/file")));
 }
 
 TEST_F(LlvmLibcRealpathTest, SymlinkWithinDirectoryTraversalResolves) {
@@ -550,7 +612,7 @@ TEST_F(LlvmLibcRealpathTest, SymlinkWithinDirectoryTraversalResolves) {
   ASSERT_THAT(test_dir.symlink("a/b", "link"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("link/c")),
-               test_dir.absolute_path("a/b/c").c_str());
+               c_str(test_dir.absolute_path("a/b/c")));
 }
 
 TEST_F(LlvmLibcRealpathTest, MultipleSymlinkResolutions) {
@@ -563,7 +625,7 @@ TEST_F(LlvmLibcRealpathTest, MultipleSymlinkResolutions) {
   ASSERT_THAT(test_dir.touch("d"), Succeeds());
 
   ASSERT_STREQ(realpath_buffered(test_dir.absolute_path("a")),
-               test_dir.absolute_path("d").c_str());
+               c_str(test_dir.absolute_path("d")));
 }
 
 TEST_F(LlvmLibcRealpathTest, SymlinkLoop) {
@@ -581,11 +643,11 @@ TEST_F(LlvmLibcRealpathTest, LongSymlinkErrorsWithNameTooLong) {
   TestDir test_dir;
   ASSERT_TRUE(create_test_dir("LongSymlinkErrorsWithNameTooLong", test_dir));
 
-  cpp::string target(PATH_MAX - 1, 'a');
+  PathVector target(PATH_MAX - 1, 'a');
   for (size_t i = 0; i < target.size(); i += NAME_MAX)
     target[i] = '/';
 
-  ASSERT_THAT(test_dir.symlink(target.c_str(), "link"), Succeeds());
+  ASSERT_THAT(test_dir.symlink(c_str(target), "link"), Succeeds());
 
   // The link resolves to a maximum length path,
   // so adding anything to the end means the intermediary path is too long.

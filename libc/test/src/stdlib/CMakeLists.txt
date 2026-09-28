@@ -381,11 +381,11 @@ add_libc_test(
     libc.hdr.func.free
     libc.hdr.limits_macros
     libc.hdr.types.size_t
-    libc.src.__support.CPP.string
     libc.src.__support.CPP.string_view
     libc.src.__support.CPP.utility
     libc.src.__support.c_string
     libc.src.__support.fixedvector
+    libc.src.__support.integer_to_string
     libc.src.__support.libc_assert
     libc.src.__support.libc_errno
     libc.src.__support.macros.config
