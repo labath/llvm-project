@@ -23,8 +23,8 @@ namespace LIBC_NAMESPACE_DECL {
 
 LLVM_LIBC_FUNCTION(void, regfree, (regex_t * preg)) {
   LIBC_CRASH_ON_NULLPTR(preg);
-  // TODO: Once RegexInternal is managed via cpp::unique_ptr, reset the smart
-  // pointer here instead of calling delete manually.
+  // regcomp() hands over the ownership of the RegexInternal through a raw
+  // pointer, as regex_t is a C struct.
   delete static_cast<regex::RegexInternal *>(preg->__internal);
   preg->__internal = nullptr;
   preg->re_nsub = 0;

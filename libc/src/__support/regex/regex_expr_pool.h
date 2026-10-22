@@ -16,6 +16,7 @@
 
 #include "src/__support/CPP/array.h"
 #include "src/__support/CPP/span.h"
+#include "src/__support/CPP/unique_ptr.h"
 #include "src/__support/error_or.h"
 #include "src/__support/libc_assert.h"
 #include "src/__support/macros/config.h"
@@ -65,36 +66,33 @@ class ExprPool {
   /// regular expressions.
   static constexpr size_t MAX_NODE_LIMIT = 10000;
 
-  // TODO: Once cpp::unique_ptr and AllocChecker-backed cpp::make_unique (and/or
-  // an owning unique_span) are available in src/__support/CPP/, replace raw
-  // Block* and span-backed manual new[]/delete[] ownership here so that Block
-  // lifecycles, directory growth, ByteSet growth, and hash-table growth are
-  // managed via RAII and ~ExprPool() can be defaulted.
-
-  /// Span of allocated Block* slots (capacity = blocks.size()).
-  cpp::span<Block *> blocks;
+  /// Directory of allocated blocks (capacity = blocks_capacity).
+  cpp::unique_ptr<cpp::unique_ptr<Block>[]> blocks;
+  size_t blocks_capacity = 0;
   size_t block_count = 0;
   /// Total number of nodes allocated across all blocks.
   size_t node_count = 0;
 
   /// Lazily allocated array of deduplicated 256-bit character sets.
-  cpp::span<ByteSet> byte_sets;
+  cpp::unique_ptr<ByteSet[]> byte_sets;
+  size_t byte_sets_capacity = 0;
   size_t byte_set_count = 0;
 
   /// Open-addressing hash table storing ExprIds (0 = empty bucket).
-  cpp::span<ExprId> hashtable;
+  cpp::unique_ptr<ExprId[]> hashtable;
+  size_t hashtable_capacity = 0;
 
-  cpp::span<Block *const> active_blocks() const {
-    return blocks.first(block_count);
+  cpp::span<ExprId> hashtable_span() const {
+    return {hashtable.get(), hashtable_capacity};
   }
 
   cpp::span<const ByteSet> active_byte_sets() const {
-    return byte_sets.first(byte_set_count);
+    return {byte_sets.get(), byte_set_count};
   }
 
   /// Maximum number of nodes the current hash table can hold before rehashing.
   size_t max_hashtable_nodes() const {
-    return static_cast<size_t>(static_cast<double>(hashtable.size()) *
+    return static_cast<size_t>(static_cast<double>(hashtable_capacity) *
                                MAX_LOAD_FACTOR);
   }
 
@@ -123,7 +121,8 @@ class ExprPool {
 
 public:
   constexpr ExprPool() = default;
-  ~ExprPool();
+  ExprPool(const ExprPool &) = delete;
+  ExprPool &operator=(const ExprPool &) = delete;
 
   /// Resolves an ExprId to a reference.
   const Expr &get(ExprId id) const { return slot_at(id); }
@@ -148,8 +147,10 @@ public:
 
   /// Returns the current heap bytes allocated by this pool.
   size_t allocated_bytes() const {
-    return (block_count * sizeof(Block)) + blocks.size_bytes() +
-           hashtable.size_bytes() + byte_sets.size_bytes();
+    return (block_count * sizeof(Block)) +
+           (blocks_capacity * sizeof(cpp::unique_ptr<Block>)) +
+           (hashtable_capacity * sizeof(ExprId)) +
+           (byte_sets_capacity * sizeof(ByteSet));
   }
 
   // TODO: Use fluent interface (and_then, transform) for these factories once
