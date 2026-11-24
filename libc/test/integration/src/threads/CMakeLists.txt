@@ -69,6 +69,7 @@ add_integration_test(
   SRCS
     tss_test.cpp
   DEPENDS
+    libc.hdr.limits_macros
     libc.include.threads
     libc.src.threads.thrd_create
     libc.src.threads.thrd_exit

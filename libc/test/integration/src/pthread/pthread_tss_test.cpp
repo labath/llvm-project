@@ -11,6 +11,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "hdr/errno_macros.h"
 #include "hdr/limits_macros.h"
 #include "src/pthread/pthread_create.h"
 #include "src/pthread/pthread_exit.h"
@@ -142,11 +143,27 @@ static void dtor_iteration_limit_test() {
   ASSERT_EQ(LIBC_NAMESPACE::pthread_key_delete(key), 0);
 }
 
+static void out_of_range_key_test() {
+  // TSS_KEY_COUNT in src/__support/threads/thread.cpp is 1024.
+  constexpr pthread_key_t OUT_OF_RANGE_KEY = 1024U;
+  int value = 42;
+
+  ASSERT_EQ(LIBC_NAMESPACE::pthread_setspecific(OUT_OF_RANGE_KEY, &value),
+            EINVAL);
+  ASSERT_EQ(LIBC_NAMESPACE::pthread_getspecific(OUT_OF_RANGE_KEY), nullptr);
+  ASSERT_EQ(LIBC_NAMESPACE::pthread_key_delete(OUT_OF_RANGE_KEY), EINVAL);
+
+  ASSERT_EQ(LIBC_NAMESPACE::pthread_setspecific(UINT_MAX, &value), EINVAL);
+  ASSERT_EQ(LIBC_NAMESPACE::pthread_getspecific(UINT_MAX), nullptr);
+  ASSERT_EQ(LIBC_NAMESPACE::pthread_key_delete(UINT_MAX), EINVAL);
+}
+
 TEST_MAIN() {
   standard_usage_test();
   null_value_test();
   getspecific_nullptr_in_dtor_test();
   multiple_dtor_test();
   dtor_iteration_limit_test();
+  out_of_range_key_test();
   return 0;
 }

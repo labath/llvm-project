@@ -86,6 +86,8 @@ public:
   }
 
   bool is_valid_key(unsigned int key) {
+    if (key >= TSS_KEY_COUNT)
+      return false;
     cpp::lock_guard lock(mtx);
     return units[key].active;
   }

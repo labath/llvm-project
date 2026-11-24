@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "hdr/limits_macros.h"
 #include "src/threads/thrd_create.h"
 #include "src/threads/thrd_exit.h"
 #include "src/threads/thrd_join.h"
@@ -59,6 +60,14 @@ TEST_MAIN() {
   ASSERT_EQ(child_thread_data, THREAD_DATA_FINIVAL);
 
   LIBC_NAMESPACE::tss_delete(key);
+
+  // TSS_KEY_COUNT in src/__support/threads/thread.cpp is 1024.
+  constexpr tss_t OUT_OF_RANGE_KEY = 1024U;
+  int value = 42;
+  ASSERT_EQ(LIBC_NAMESPACE::tss_set(OUT_OF_RANGE_KEY, &value), thrd_error);
+  ASSERT_EQ(LIBC_NAMESPACE::tss_get(OUT_OF_RANGE_KEY), nullptr);
+  ASSERT_EQ(LIBC_NAMESPACE::tss_set(UINT_MAX, &value), thrd_error);
+  ASSERT_EQ(LIBC_NAMESPACE::tss_get(UINT_MAX), nullptr);
 
   return 0;
 }
